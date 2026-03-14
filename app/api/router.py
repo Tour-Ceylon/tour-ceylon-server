@@ -1,7 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import users
-from app.api.v1 import listing
+from app.api.v1 import users, listing, bookings
 
 api_router = APIRouter()
 
@@ -16,4 +15,10 @@ api_router.include_router(
     listing.router,
     prefix="/listings",
     tags=["listings"]
+)
+
+api_router.include_router(
+    bookings.router,
+    prefix="/bookings",
+    tags=["bookings"]
 )
