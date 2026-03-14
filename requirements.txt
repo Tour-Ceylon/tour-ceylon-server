@@ -1,1 +1,13 @@
 # Placeholder
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
+alembic
+pydantic
+python-dotenv
+stripe
+httpx
+passlib[bcrypt]
+python-jose
+cloudinary
