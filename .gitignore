@@ -1,0 +1,159 @@
+# ==============================
+
+# ENVIRONMENT VARIABLES
+
+# ==============================
+
+.env
+.env.*
+*.env
+
+# ==============================
+
+# PYTHON CACHE / BUILD FILES
+
+# ==============================
+
+**pycache**/
+*.py[cod]
+*$py.class
+*.so
+
+# Python packaging
+
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# ==============================
+
+# VIRTUAL ENVIRONMENTS
+
+# ==============================
+
+venv/
+env/
+ENV/
+.venv/
+
+# ==============================
+
+# LOG FILES
+
+# ==============================
+
+*.log
+logs/
+log/
+
+# ==============================
+
+# TEST / COVERAGE
+
+# ==============================
+
+.pytest_cache/
+.coverage
+coverage/
+htmlcov/
+
+# ==============================
+
+# DATABASE FILES
+
+# ==============================
+
+*.sqlite3
+*.db
+*.sql
+*.dump
+
+# ==============================
+
+# IDE / EDITOR FILES
+
+# ==============================
+
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ==============================
+
+# OPERATING SYSTEM FILES
+
+# ==============================
+
+.DS_Store
+Thumbs.db
+
+# ==============================
+
+# DOCKER
+
+# ==============================
+
+docker/*.log
+docker/tmp/
+docker/cache/
+
+# ==============================
+
+# TEMP FILES
+
+# ==============================
+
+tmp/
+temp/
+*.tmp
+
+# ==============================
+
+# SECRETS / CREDENTIALS
+
+# ==============================
+
+secrets.json
+credentials.json
+service-account.json
+firebase-adminsdk.json
+
+# ==============================
+
+# UPLOADS / MEDIA (IF LOCAL)
+
+# ==============================
+
+uploads/
+media/
+
+# ==============================
+
+# AI / MODEL CACHE
+
+# ==============================
+
+models/
+ml_cache/
+*.pt
+*.pth
+*.onnx
+
+# ==============================
+
+# NOTEBOOKS (IF USED)
+
+# ==============================
+
+.ipynb_checkpoints/
+
+# ==============================
+
+# LOCAL CONFIG OVERRIDES
+
+# ==============================
+
+local_settings.py
