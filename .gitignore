@@ -157,3 +157,9 @@ ml_cache/
 # ==============================
 
 local_settings.py
+
+
+frontend_endpoint.md
+
+
+app/tests/*

@@ -1,20 +1,20 @@
-# Placeholder
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 
-class TourBase(BaseModel):
+class TransferBase(BaseModel):
     listing_id: UUID
-    duration: str
-    route: str
+    origin: str
+    destination: str
+    vehicle_type: str
     price: float
 
 
-class TourCreate(TourBase):
+class TransferCreate(TransferBase):
     pass
 
 
-class TourResponse(TourBase):
+class TransferResponse(TransferBase):
     id: UUID
 
     model_config = ConfigDict(from_attributes=True)

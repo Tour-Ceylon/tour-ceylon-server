@@ -7,7 +7,7 @@ from app.config.database import Base
 from app.models.enum import UserRole
 
 class User(Base):
-    __tablename__ = "users"
+    __tablename__ = "Users"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     email = Column(String, unique=True, nullable=False, index=True)
     full_name = Column(String, nullable=True)
