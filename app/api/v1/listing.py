@@ -13,7 +13,7 @@ from app.schemas.listing_schema import (
     ListingListResponse, 
     ListingSearchParams
 )
-from app.models.enum import ListingType, ListingStatus, CurrencyType
+from app.models.enum import ListingType, CurrencyType
 
 router = APIRouter()
 
@@ -87,14 +87,14 @@ async def get_listing_by_slug(
 async def get_listings(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
-    status: ListingStatus = Query(None),
+    is_active: bool = Query(None),
     db: Session = Depends(get_db),
     listing_repo: ListingRepository = Depends(get_listing_repository)
 ):
     """Get all listings with pagination"""
     
-    listings = listing_repo.get_all(skip=skip, limit=limit, status=status)
-    total = listing_repo.count_published_listings() if status else len(listings)
+    listings = listing_repo.get_all(skip=skip, limit=limit, is_active=is_active)
+    total = listing_repo.count_active() if is_active else len(listings)
     
     return ListingListResponse(
         listings=listings,
@@ -198,9 +198,9 @@ async def publish_listing(
     db: Session = Depends(get_db),
     listing_repo: ListingRepository = Depends(get_listing_repository)
 ):
-    """Publish listing"""
+    """Publish (activate) listing"""
     
-    listing = listing_repo.publish(listing_id)
+    listing = listing_repo.activate(listing_id)
     if not listing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -216,9 +216,9 @@ async def draft_listing(
     db: Session = Depends(get_db),
     listing_repo: ListingRepository = Depends(get_listing_repository)
 ):
-    """Set listing to draft"""
+    """Set listing to draft (deactivate)"""
     
-    listing = listing_repo.draft(listing_id)
+    listing = listing_repo.deactivate(listing_id)
     if not listing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -240,15 +240,24 @@ async def get_listings_by_type(
     return listings
 
 
-@router.get("/status/{listing_status}", response_model=List[ListingResponse])
-async def get_listings_by_status(
-    listing_status: ListingStatus,
+@router.get("/active", response_model=List[ListingResponse])
+async def get_active_listings(
     db: Session = Depends(get_db),
     listing_repo: ListingRepository = Depends(get_listing_repository)
 ):
-    """Get all listings by status"""
+    """Get all active listings"""
     
-    listings = listing_repo.get_by_status(listing_status)
+    listings = listing_repo.get_active()
+    return listings
+
+@router.get("/inactive", response_model=List[ListingResponse])
+async def get_inactive_listings(
+    db: Session = Depends(get_db),
+    listing_repo: ListingRepository = Depends(get_listing_repository)
+):
+    """Get all inactive listings"""
+    
+    listings = listing_repo.get_inactive()
     return listings
 
 
@@ -310,19 +319,15 @@ async def get_listing_stats(
     """Get listing count statistics"""
     
     type_counts = listing_repo.count_by_type()
-    status_counts = listing_repo.count_by_status()
     currency_counts = listing_repo.count_by_currency()
     
-    published_count = listing_repo.count_published_listings()
-    draft_count = listing_repo.count_draft_listings()
-    archived_count = listing_repo.count_archived_listings()
+    active_count = listing_repo.count_active()
+    inactive_count = listing_repo.count_inactive()
     
     return {
         "type_distribution": type_counts,
-        "status_distribution": status_counts,
         "currency_distribution": currency_counts,
-        "published_listings": published_count,
-        "draft_listings": draft_count,
-        "archived_listings": archived_count,
-        "total_listings": published_count + draft_count + archived_count
+        "active_listings": active_count,
+        "inactive_listings": inactive_count,
+        "total_listings": active_count + inactive_count
     }

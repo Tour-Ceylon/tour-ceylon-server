@@ -25,3 +25,4 @@ class AdminSettingsRepository:
         self.db.refresh(settings)
         return settings
 
+

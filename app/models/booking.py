@@ -10,7 +10,7 @@ from app.models.enum import BookingStatus
 class Bookings(Base):
     __tablename__ = "Bookings"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("Users.id"), nullable=False)
     listing_id = Column(UUID(as_uuid=True), ForeignKey("Listings.id"), nullable=False)
     travel_date = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     travel_count = Column(Integer, default=1, nullable=False)
