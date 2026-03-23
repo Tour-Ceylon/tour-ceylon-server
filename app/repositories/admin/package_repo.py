@@ -2,7 +2,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.models.admin_dashboard import Package
+from app.models.admin_dashboard import Package, PackageAddOn
 
 
 class AdminPackageRepository:
@@ -10,8 +10,11 @@ class AdminPackageRepository:
         self.db = db
 
     def create(self, package_data: dict) -> Package:
+        add_on_ids = package_data.pop("add_ons", []) or []
         package = Package(**package_data)
         self.db.add(package)
+        for add_on_id in add_on_ids:
+            package.add_ons.append(PackageAddOn(add_on_id=self._to_uuid(add_on_id)))
         self.db.commit()
         self.db.refresh(package)
         return package
@@ -38,8 +41,15 @@ class AdminPackageRepository:
         )
 
     def update(self, package: Package, updates: dict) -> Package:
+        add_on_ids = updates.pop("add_ons", None)
         for field, value in updates.items():
             setattr(package, field, value)
+
+        if add_on_ids is not None:
+            package.add_ons.clear()
+            for add_on_id in add_on_ids:
+                package.add_ons.append(PackageAddOn(add_on_id=self._to_uuid(add_on_id)))
+
         self.db.commit()
         self.db.refresh(package)
         return package
@@ -56,3 +66,5 @@ class AdminPackageRepository:
         self.db.query(Package).delete()
         self.db.commit()
 
+    def _to_uuid(self, value: UUID | str) -> UUID:
+        return value if isinstance(value, UUID) else UUID(value)

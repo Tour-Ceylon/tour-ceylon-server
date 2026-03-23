@@ -72,7 +72,11 @@ class AdminDashboardService:
         return self._build_package_response(package)
 
     def create_addon(self, payload: dict) -> dict:
-        addon = self.addons.create(**payload)
+        normalized_payload = {
+            **payload,
+            "category": self._normalize_addon_category(payload["category"]),
+        }
+        addon = self.addons.create(**normalized_payload)
         return self._build_addon_response(addon)
 
     def delete_addon(self, addon_id: UUID) -> None:
@@ -181,8 +185,20 @@ class AdminDashboardService:
             value = payload.get(source_key)
             if value is None and partial:
                 continue
+            if source_key == "category" and value is not None:
+                value = self._normalize_package_category(value)
             data[target_key] = value
         return data
+
+    def _normalize_package_category(self, category: str) -> str:
+        return category.strip().replace("-", "_").upper()
+
+    def _normalize_addon_category(self, category: str) -> str:
+        normalized = category.strip().replace("-", "_").upper()
+        aliases = {
+            "ACCOMMODATION": "COMFORT",
+        }
+        return aliases.get(normalized, normalized)
 
     def _listing_model_data(self, category: str, payload: dict, partial: bool = False) -> dict:
         location = payload.get("location")
@@ -232,12 +248,15 @@ class AdminDashboardService:
         return build_package_response(package)
 
     def _build_addon_response(self, addon) -> dict:
+        category = getattr(addon.category, "value", addon.category)
+        if isinstance(category, str):
+            category = category.lower().replace("_", "-")
         return {
             "id": addon.id,
             "name": addon.name,
             "description": addon.description,
             "price": addon.price,
-            "category": addon.category,
+            "category": category,
         }
 
     def _build_listing_response(self, listing) -> dict:
