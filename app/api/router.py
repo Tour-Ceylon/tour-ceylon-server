@@ -2,15 +2,13 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     admin,
+    packages,
     users, 
     listing, 
     bookings, 
-    activities, 
     guest_reviews, 
-    includes, 
     review_metrics, 
-    rooms, 
-    transfers
+    rooms
 )
 
 api_router = APIRouter()
@@ -19,6 +17,12 @@ api_router.include_router(
     admin.router,
     prefix="/admin",
     tags=["admin"]
+)
+
+api_router.include_router(
+    packages.router,
+    prefix="/packages",
+    tags=["packages"]
 )
 
 # Include user routes
@@ -40,23 +44,10 @@ api_router.include_router(
     tags=["bookings"]
 )
 
-# Include new entity routes
-api_router.include_router(
-    activities.router,
-    prefix="/activities",
-    tags=["activities"]
-)
-
 api_router.include_router(
     guest_reviews.router,
     prefix="/guest-reviews",
     tags=["guest-reviews"]
-)
-
-api_router.include_router(
-    includes.router,
-    prefix="/includes",
-    tags=["includes"]
 )
 
 api_router.include_router(
@@ -69,10 +60,4 @@ api_router.include_router(
     rooms.router,
     prefix="/rooms",
     tags=["rooms"]
-)
-
-api_router.include_router(
-    transfers.router,
-    prefix="/transfers",
-    tags=["transfers"]
 )

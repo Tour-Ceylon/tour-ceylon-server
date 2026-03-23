@@ -187,3 +187,5 @@ docker/
 - **External APIs**: Google Maps, Payment gateways, Currency services
 
 This structure follows clean architecture principles, ensuring maintainability, testability, and scalability for the tour booking platform.
+
+
