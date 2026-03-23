@@ -137,6 +137,8 @@ media/
 # ==============================
 
 models/
+!app/models/
+!app/models/*.py
 ml_cache/
 *.pt
 *.pth
