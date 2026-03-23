@@ -19,8 +19,23 @@ class AdminPackageRepository:
     def get_all(self) -> list[Package]:
         return self.db.query(Package).order_by(Package.created_at.desc()).all()
 
+    def get_all_active(self) -> list[Package]:
+        return (
+            self.db.query(Package)
+            .filter(Package.is_active.is_(True))
+            .order_by(Package.created_at.desc())
+            .all()
+        )
+
     def get(self, package_id: UUID) -> Package | None:
         return self.db.query(Package).filter(Package.id == package_id).first()
+
+    def get_active(self, package_id: UUID) -> Package | None:
+        return (
+            self.db.query(Package)
+            .filter(Package.id == package_id, Package.is_active.is_(True))
+            .first()
+        )
 
     def update(self, package: Package, updates: dict) -> Package:
         for field, value in updates.items():
@@ -40,5 +55,4 @@ class AdminPackageRepository:
     def delete_all(self) -> None:
         self.db.query(Package).delete()
         self.db.commit()
-
 

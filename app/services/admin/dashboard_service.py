@@ -9,6 +9,7 @@ from app.repositories.admin.addon_repo import AdminAddonRepository
 from app.repositories.admin.listing_repo import AdminDashboardListingRepository
 from app.repositories.admin.package_repo import AdminPackageRepository
 from app.repositories.admin.settings_repo import AdminSettingsRepository
+from app.services.package_service import build_package_response
 
 
 class AdminDashboardService:
@@ -228,20 +229,7 @@ class AdminDashboardService:
         pass  # No longer needed, removed calls above
 
     def _build_package_response(self, package) -> dict:
-        return {
-            "id": package.id,
-            "name": package.name,
-            "description": package.description,
-            "duration": package.duration,
-            "route": package.route,
-            "basePrice": package.base_price,
-            "image": package.image,
-            "category": package.category,
-            "includes": package.includes or [],
-            "itinerary": package.itinerary or [],
-            "addOns": package.add_ons or [],
-            "isActive": package.is_active,
-        }
+        return build_package_response(package)
 
     def _build_addon_response(self, addon) -> dict:
         return {
