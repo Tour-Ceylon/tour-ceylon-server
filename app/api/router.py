@@ -8,7 +8,8 @@ from app.api.v1 import (
     bookings, 
     guest_reviews, 
     review_metrics, 
-    rooms
+    rooms,
+    wishlist,
 )
 
 api_router = APIRouter()
@@ -60,4 +61,10 @@ api_router.include_router(
     rooms.router,
     prefix="/rooms",
     tags=["rooms"]
+)
+
+api_router.include_router(
+    wishlist.router,
+    prefix="/wishlist",
+    tags=["wishlist"]
 )

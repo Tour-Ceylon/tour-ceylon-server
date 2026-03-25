@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
@@ -9,6 +11,11 @@ from app.models.user import Base
 
 # Create tables on startup
 Base.metadata.create_all(bind=engine)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 
 app = FastAPI(title="Travel Ready Tours")
 app.add_exception_handler(AdminAPIError, admin_api_error_handler)
