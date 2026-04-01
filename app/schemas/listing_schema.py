@@ -16,8 +16,10 @@ class ListingBase(BaseModel):
     image: Optional[str] = None
     rating: Optional[float] = None
     review_count: Optional[int] = None
+    group_size: Optional[int] = None
     cancellation_policy: Optional[str] = None
     includes: list[str] = []
+    excludes: list[str] = []
     recommendation: Optional[str] = None
     is_active: bool = True
 

@@ -24,6 +24,8 @@ def build_package_response(package) -> dict:
             add_on_values.append(add_on)
 
     category = getattr(package.category, "value", package.category)
+    if isinstance(category, str):
+        category = category.lower().replace("_", "-")
 
     return {
         "id": package.id,
