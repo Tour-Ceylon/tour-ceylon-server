@@ -1,35 +1,26 @@
-from datetime import datetime, timezone
-import uuid
-from sqlalchemy import Column, String, Float, Integer, Text, Enum, DateTime, Boolean
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, String, Enum, Boolean
+from sqlalchemy.orm import relationship
 
-from app.config.database import Base
+from app.models.base import Base, UUIDMixin, TimestampMixin, SoftDeleteMixin
 from app.models.enum import UserRole
 
-class User(Base):
-    __tablename__ = "Users"
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+
+class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
+    __tablename__ = "users"
+
+    # Core fields
     email = Column(String, unique=True, nullable=False, index=True)
     full_name = Column(String, nullable=True)
-    country = Column(String)
+    country = Column(String, nullable=True)
+
+    # Role
     role = Column(
-        Enum(UserRole),
+        Enum(UserRole, name="user_role_enum"),
         default=UserRole.TOURIST,
         nullable=False
     )
-    is_active = Column(
-        Boolean,
-        default=True,
-        nullable=False
-    )
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-        nullable=False
-    )
 
-
-
-
+    # Relationships (based on your ERD)
+    bookings = relationship("Booking", back_populates="user")
+    wishlists = relationship("Wishlist", back_populates="user")
+    reviews = relationship("Review", back_populates="user")

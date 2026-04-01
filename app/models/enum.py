@@ -134,3 +134,14 @@ class TransferLocationType(str, Enum):
     LANDMARK = "landmark"
     STATION = "station"
     CUSTOM = "custom"
+
+
+class PropertType(str, Enum):
+    HOTEL ='hotel'
+    RESORT = 'resort'
+    VILLA = 'villa'
+    APARTMENT = 'apartment'
+    HOSTEL = 'hostel'
+    GUEST_HOUSE = 'guesthouse'
+    HOMESTAY = 'homestay'
+    BOUTIQUE_HOTEL = 'boutique_hotel'
