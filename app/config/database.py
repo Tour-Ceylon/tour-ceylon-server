@@ -1,7 +1,10 @@
 import os
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+
 from dotenv import load_dotenv
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.models.base import Base
 
 # Load environment variables
 load_dotenv()
@@ -28,10 +31,6 @@ SessionLocal = sessionmaker(
     autoflush=False,
     bind=engine
 )
-
-# Base class for models
-Base = declarative_base()
-
 
 # Dependency for FastAPI routes
 def get_db():

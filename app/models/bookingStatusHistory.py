@@ -44,4 +44,8 @@ class BookingStatusHistory(Base, UUIDMixin):
     )
 
     booking = relationship("Booking", back_populates="status_history")
-    changed_by_user = relationship("User")
+    changed_by_user = relationship(
+        "User",
+        back_populates="changed_booking_statuses",
+        foreign_keys=[changed_by_user_id],
+    )

@@ -5,11 +5,11 @@ from app.models.base import Base, UUIDMixin, TimestampMixin, SoftDeleteMixin
 from app.models.enum import BookingUnit
 
 
-class Listing_Variant(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
-    __tablename__ = "listing_variant"
+class ListingVariant(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
+    __tablename__ = "listing_variants"
 
 
-    listing_id = Column(UUID(as_uuid=True), ForeignKey("Listings.id"), nullable=False, index=True, unique=True)
+    listing_id = Column(UUID(as_uuid=True), ForeignKey("listings.id"), nullable=False, index=True)
 
 
     name = Column(String, unique=True, nullable=False, index=True)
@@ -23,6 +23,16 @@ class Listing_Variant(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     capacity_min = Column(Integer, nullable=True)
     capacity_max = Column(Integer, nullable=True)
 
-    is_defaut = Column(Boolean, default=True, nullable=False)
+    is_default = Column(Boolean, default=True, nullable=False)
+
+    listing = relationship("Listing", back_populates="variants")
+    booking_items = relationship("BookingItem", back_populates="variant")
+    pricing_rules = relationship("PricingRule", back_populates="variant", cascade="all, delete-orphan")
+    availability_entries = relationship(
+        "AvailabilityCalendar",
+        back_populates="variant",
+        cascade="all, delete-orphan",
+    )
 
 
+Listing_Variant = ListingVariant

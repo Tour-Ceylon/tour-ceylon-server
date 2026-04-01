@@ -10,7 +10,7 @@ class HotelDetail(Base, UUIDMixin):
 
     listing_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("Listings.id"),
+        ForeignKey("listings.id"),
         nullable=False,
         index=True,
         unique=True
@@ -28,3 +28,5 @@ class HotelDetail(Base, UUIDMixin):
     check_out_time = Column(Time, nullable=False)
 
     child_policy = Column(String, nullable=True)
+
+    listing = relationship("Listing", back_populates="hotel_detail")

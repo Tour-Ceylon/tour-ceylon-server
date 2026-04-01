@@ -9,7 +9,7 @@ class CancellationPolicy(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "cancellation_policies"
 
 
-    listing_id = Column(UUID(as_uuid=True), ForeignKey("Listings.id"),nullable=False, index=True, unique=True)
+    listing_id = Column(UUID(as_uuid=True), ForeignKey("listings.id"), nullable=False, index=True)
 
     policy_type = Column(
         Enum(CancellationPolicyType, name="cancellation_policy_type_enum"),
@@ -27,3 +27,4 @@ class CancellationPolicy(Base, UUIDMixin, TimestampMixin):
         default=PenaltyType.PERCENTAGE
     )
 
+    listing = relationship("Listing", back_populates="cancellation_policies")

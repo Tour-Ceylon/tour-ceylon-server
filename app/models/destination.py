@@ -20,4 +20,3 @@ class Destination(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
 
     listings = relationship("Listing", back_populates="destination")
 
-

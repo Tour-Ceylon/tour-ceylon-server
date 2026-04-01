@@ -29,4 +29,4 @@ class PaymentTransaction(Base, UUIDMixin):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     # Relationship
-    booking = relationship("Booking", back_populates="payment_transactions")
+    booking = relationship("Booking", back_populates="payments")

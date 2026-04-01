@@ -11,21 +11,21 @@ class Review(Base, UUIDMixin, TimestampMixin):
 
     booking_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("Bookings.id"),
+        ForeignKey("bookings.id"),
         nullable=False,
         index=True
     )
 
     user_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("Users.id"),
+        ForeignKey("users.id"),
         nullable=False,
         index=True
     )
 
     listing_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("Listings.id"),
+        ForeignKey("listings.id"),
         nullable=False,
         index=True
     )
@@ -40,5 +40,5 @@ class Review(Base, UUIDMixin, TimestampMixin):
 
     # Relationships
     user = relationship("User", back_populates="reviews")
-    lisitng = relationship("Listing", back_populates="reviews")
+    listing = relationship("Listing", back_populates="reviews")
     booking = relationship("Booking", back_populates="reviews")

@@ -30,6 +30,9 @@ class CurrencyCode(str, Enum):
     CNY = "CNY"
     LKR = "LKR"
 
+
+CurrencyType = CurrencyCode
+
 class BookingUnit(str, Enum):
     PER_PERSON = "per_person"
     PER_GROUP = "per_group"
@@ -136,12 +139,15 @@ class TransferLocationType(str, Enum):
     CUSTOM = "custom"
 
 
-class PropertType(str, Enum):
-    HOTEL ='hotel'
-    RESORT = 'resort'
-    VILLA = 'villa'
-    APARTMENT = 'apartment'
-    HOSTEL = 'hostel'
-    GUEST_HOUSE = 'guesthouse'
-    HOMESTAY = 'homestay'
-    BOUTIQUE_HOTEL = 'boutique_hotel'
+class PropertyType(str, Enum):
+    HOTEL = "hotel"
+    RESORT = "resort"
+    VILLA = "villa"
+    APARTMENT = "apartment"
+    HOSTEL = "hostel"
+    GUEST_HOUSE = "guesthouse"
+    HOMESTAY = "homestay"
+    BOUTIQUE_HOTEL = "boutique_hotel"
+
+
+PropertType = PropertyType

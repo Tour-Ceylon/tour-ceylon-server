@@ -1,24 +1,22 @@
-from sqlalchemy import Column, Enum, String, ForeignKey, UUID
+from sqlalchemy import Column, ForeignKey, Integer, String, UUID
 from sqlalchemy.orm import relationship
 
 from app.models.base import Base, UUIDMixin, TimestampMixin
-from app.models.enum import TransferLocationType, DestinationType
 
 
-class TourDetails(Base, UUIDMixin, TimestampMixin):
-    __tablename__ = "cancellation_policies"
+class TourDetail(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "tour_details"
 
 
-    listing_id = Column(UUID(as_uuid=True), ForeignKey("Listings.id"),nullable=False, index=True, unique=True)
+    listing_id = Column(UUID(as_uuid=True), ForeignKey("listings.id"), nullable=False, index=True, unique=True)
 
-    transfer_location_type = Column(
-        Enum(TransferLocationType, name="transfer_location_type_enum"),
-        nullable=False
-    )
+    duration_days = Column(Integer, nullable=False)
 
-    destination_type = Column(
-        Enum(DestinationType, name="destination_type_enum"),
-        nullable=False
-    )
+    route_summary = Column(String, nullable=False)
 
-    vehicle_policy = Column(String, nullable=False)
+    meeting_point = Column(String, nullable=False)
+
+    listing = relationship("Listing", back_populates="tour_detail")
+
+
+TourDetails = TourDetail

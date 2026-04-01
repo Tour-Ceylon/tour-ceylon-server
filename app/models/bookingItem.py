@@ -14,7 +14,7 @@ class BookingItem(Base, UUIDMixin):
         index=True
     )
 
-    listings_id = Column(
+    listing_id = Column(
         UUID(as_uuid=True),
         ForeignKey("listings.id"),
         nullable=False
@@ -22,7 +22,7 @@ class BookingItem(Base, UUIDMixin):
 
     variant_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("listings_variants.id"),
+        ForeignKey("listing_variants.id"),
         nullable=False
     )
 
@@ -34,6 +34,7 @@ class BookingItem(Base, UUIDMixin):
 
     total_price = Column(Float, nullable=False)
 
-    booking = relationship("Booking", back_populates="items")
-    listing = relationship("Listing")
-    variant = relationship("ListingVariant")
+    booking = relationship("Booking", back_populates="booking_items")
+    listing = relationship("Listing", back_populates="booking_items")
+    variant = relationship("ListingVariant", back_populates="booking_items")
+    travelers = relationship("BookingTraveler", back_populates="booking_item", cascade="all, delete-orphan")

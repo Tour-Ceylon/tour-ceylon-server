@@ -29,7 +29,10 @@ class Booking(Base, UUIDMixin, TimestampMixin):
 
     # Relationships
     user = relationship("User", back_populates="bookings")
-    booking_items = relationship("BookingItem", back_populates="booking")
-    payments = relationship("PaymentTransaction", back_populates="booking")
-    status_history = relationship("BookingStatusHistory", back_populates="booking")
+    booking_items = relationship("BookingItem", back_populates="booking", cascade="all, delete-orphan")
+    payments = relationship("PaymentTransaction", back_populates="booking", cascade="all, delete-orphan")
+    status_history = relationship("BookingStatusHistory", back_populates="booking", cascade="all, delete-orphan")
     reviews = relationship("Review", back_populates="booking")
+
+
+Bookings = Booking

@@ -13,7 +13,7 @@ from app.schemas.listing_schema import (
     ListingListResponse, 
     ListingSearchParams
 )
-from app.models.enum import ListingType, CurrencyType
+from app.models.enum import CurrencyCode, ListingType
 
 router = APIRouter()
 
@@ -182,7 +182,7 @@ async def archive_listing(
 ):
     """Archive listing (soft delete)"""
     
-    listing = listing_repo.soft_delete(listing_id)
+    listing = listing_repo.deactivate(listing_id)
     if not listing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -287,7 +287,7 @@ async def get_listings_by_district(
 
 @router.get("/currency/{currency}", response_model=List[ListingResponse])
 async def get_listings_by_currency(
-    currency: CurrencyType,
+    currency: CurrencyCode,
     db: Session = Depends(get_db),
     listing_repo: ListingRepository = Depends(get_listing_repository)
 ):

@@ -8,7 +8,7 @@ from app.models.enum import SafariType
 class SafariDetail(Base, UUIDMixin):
     __tablename__ = "safari_details"
 
-    listing_id = Column(UUID(as_uuid=True), ForeignKey("Listings.id"),nullable=False, index=True, unique=True)
+    listing_id = Column(UUID(as_uuid=True), ForeignKey("listings.id"), nullable=False, index=True, unique=True)
 
     national_park = Column(String, nullable=False)
 
@@ -19,6 +19,7 @@ class SafariDetail(Base, UUIDMixin):
 
     duration_minutes = Column(Integer, nullable=False)
 
-    guide_inluded = Column(Boolean, nullable=False, )
+    guide_included = Column(Boolean, nullable=False)
+    pickup_supported = Column(Boolean, nullable=False, default=False)
 
-
+    listing = relationship("Listing", back_populates="safari_detail")
