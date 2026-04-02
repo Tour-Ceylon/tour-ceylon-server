@@ -1,20 +1,8 @@
-# Placeholder
-from uuid import UUID
-from pydantic import BaseModel, ConfigDict
+from app.schemas.listing_schema import (
+    TourDetailBase as TourBase,
+    TourDetailBase as TourCreate,
+    TourDetailResponse as TourResponse,
+    TourDetailUpdate as TourUpdate,
+)
 
-
-class TourBase(BaseModel):
-    listing_id: UUID
-    duration: str
-    route: str
-    price: float
-
-
-class TourCreate(TourBase):
-    pass
-
-
-class TourResponse(TourBase):
-    id: UUID
-
-    model_config = ConfigDict(from_attributes=True)
+__all__ = ["TourBase", "TourCreate", "TourUpdate", "TourResponse"]

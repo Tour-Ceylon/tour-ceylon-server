@@ -1,20 +1,8 @@
-from uuid import UUID
-from pydantic import BaseModel, ConfigDict
+from app.schemas.listing_schema import (
+    TransferDetailBase as TransferBase,
+    TransferDetailBase as TransferCreate,
+    TransferDetailResponse as TransferResponse,
+    TransferDetailUpdate as TransferUpdate,
+)
 
-
-class TransferBase(BaseModel):
-    listing_id: UUID
-    origin: str
-    destination: str
-    vehicle_type: str
-    price: float
-
-
-class TransferCreate(TransferBase):
-    pass
-
-
-class TransferResponse(TransferBase):
-    id: UUID
-
-    model_config = ConfigDict(from_attributes=True)
+__all__ = ["TransferBase", "TransferCreate", "TransferUpdate", "TransferResponse"]

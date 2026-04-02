@@ -6,22 +6,58 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models.destination import Destination
 from app.models.enum import CurrencyCode, ListingType
+from app.models.hotelDetail import HotelDetail
 from app.models.listing import Listing
+from app.models.safariDetail import SafariDetail
+from app.models.tourDetail import TourDetail
+from app.models.transferDetail import TransferDetail
 from app.schemas.listing_schema import ListingCreate, ListingSearchParams, ListingUpdate
 
 
 class ListingRepository:
     """Repository class for Listing model database operations"""
 
+    DETAIL_MODEL_BY_TYPE = {
+        ListingType.HOTEL: ("hotel_detail", HotelDetail),
+        ListingType.TOUR: ("tour_detail", TourDetail),
+        ListingType.SAFARI: ("safari_detail", SafariDetail),
+        ListingType.TRANSFER: ("transfer_detail", TransferDetail),
+    }
+    DETAIL_FIELDS = {"hotel_detail", "tour_detail", "safari_detail", "transfer_detail"}
+    BASE_FIELDS = {
+        "listing_type",
+        "destination_id",
+        "title",
+        "slug",
+        "description",
+        "latitude",
+        "longitude",
+        "status",
+        "base_currency",
+        "is_active",
+    }
+
     def __init__(self, db: Session):
         self.db = db
 
     def _base_query(self):
-        return self.db.query(Listing).options(joinedload(Listing.destination))
+        return self.db.query(Listing).options(
+            joinedload(Listing.destination),
+            joinedload(Listing.hotel_detail),
+            joinedload(Listing.tour_detail),
+            joinedload(Listing.safari_detail),
+            joinedload(Listing.transfer_detail),
+        )
 
     def create(self, listing_data: ListingCreate) -> Listing:
-        db_listing = Listing(**listing_data.model_dump())
+        payload = listing_data.model_dump()
+        base_data = {key: value for key, value in payload.items() if key in self.BASE_FIELDS}
+        db_listing = Listing(**base_data)
         self.db.add(db_listing)
+        self.db.flush()
+
+        self._sync_detail(db_listing, db_listing.listing_type, payload)
+
         self.db.commit()
         self.db.refresh(db_listing)
         return self.get_by_id(db_listing.id)
@@ -61,6 +97,9 @@ class ListingRepository:
         if search_params.base_currency:
             filters.append(Listing.base_currency == search_params.base_currency)
 
+        if search_params.status:
+            filters.append(Listing.status == search_params.status)
+
         if search_params.is_active is not None:
             filters.append(Listing.is_active == search_params.is_active)
 
@@ -78,8 +117,19 @@ class ListingRepository:
             return None
 
         update_data = listing_data.model_dump(exclude_unset=True)
-        for field, value in update_data.items():
+        detail_data = {key: value for key, value in update_data.items() if key in self.DETAIL_FIELDS}
+        base_update_data = {key: value for key, value in update_data.items() if key in self.BASE_FIELDS}
+
+        previous_type = db_listing.listing_type
+        for field, value in base_update_data.items():
             setattr(db_listing, field, value)
+
+        active_type = db_listing.listing_type
+        if previous_type != active_type:
+            self._clear_detail_for_type(db_listing, previous_type)
+
+        if detail_data or previous_type != active_type:
+            self._sync_detail(db_listing, active_type, update_data)
 
         self.db.commit()
         self.db.refresh(db_listing)
@@ -148,7 +198,10 @@ class ListingRepository:
             .group_by(Listing.listing_type)
             .all()
         )
-        return {listing_type.value if hasattr(listing_type, "value") else listing_type: count for listing_type, count in results}
+        return {
+            listing_type.value if hasattr(listing_type, "value") else listing_type: count
+            for listing_type, count in results
+        }
 
     def count_active(self) -> int:
         return self.db.query(Listing).filter(Listing.is_active.is_(True)).count()
@@ -162,7 +215,10 @@ class ListingRepository:
             .group_by(Listing.base_currency)
             .all()
         )
-        return {currency.value if hasattr(currency, "value") else currency: count for currency, count in results}
+        return {
+            currency.value if hasattr(currency, "value") else currency: count
+            for currency, count in results
+        }
 
     def exists_by_slug(self, slug: str, exclude_listing_id: Optional[UUID] = None) -> bool:
         query = self.db.query(Listing).filter(Listing.slug == slug)
@@ -188,6 +244,28 @@ class ListingRepository:
             )
             .all()
         )
+
+    def _sync_detail(self, listing: Listing, listing_type: ListingType, payload: dict) -> None:
+        relation_name, model_cls = self.DETAIL_MODEL_BY_TYPE[listing_type]
+        detail_payload = payload.get(relation_name)
+        if detail_payload is None:
+            return
+
+        existing_detail = getattr(listing, relation_name)
+        if existing_detail is None:
+            detail = model_cls(listing_id=listing.id, **detail_payload)
+            self.db.add(detail)
+            setattr(listing, relation_name, detail)
+            return
+
+        for field, value in detail_payload.items():
+            setattr(existing_detail, field, value)
+
+    def _clear_detail_for_type(self, listing: Listing, listing_type: ListingType) -> None:
+        relation_name, _ = self.DETAIL_MODEL_BY_TYPE[listing_type]
+        existing_detail = getattr(listing, relation_name)
+        if existing_detail is not None:
+            self.db.delete(existing_detail)
 
 
 def get_listing_repository(db: Session = None) -> ListingRepository:

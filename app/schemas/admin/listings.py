@@ -1,29 +1,12 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.models.enum import DestinationType, PropertyType, SafariType, TransferLocationType
 
 
 AdminListingCategory = Literal["stay", "tour", "activity", "transfer"]
-
-
-class ReviewMetricItem(BaseModel):
-    label: str
-    score: float
-
-
-class GuestReviewItem(BaseModel):
-    id: str | None = None
-    author: str
-    quote: str
-
-
-class RoomItem(BaseModel):
-    id: str | None = None
-    name: str
-    amenities: list[str]
-    pricePerNight: float
-    available: bool = True
 
 
 class CoordinateMixin(BaseModel):
@@ -40,99 +23,126 @@ class CoordinateMixin(BaseModel):
 class DestinationRef(BaseModel):
     id: UUID
     name: str
+    destination_type: DestinationType
     latitude: float | None = None
     longitude: float | None = None
 
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdminHotelDetail(BaseModel):
+    property_type: PropertyType = Field(alias="propertyType")
+    star_rating: int = Field(alias="starRating")
+    check_in_time: str = Field(alias="checkInTime")
+    check_out_time: str = Field(alias="checkOutTime")
+    child_policy: str | None = Field(default=None, alias="childPolicy")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class AdminTourDetail(BaseModel):
+    duration_days: int = Field(alias="durationDays")
+    route_summary: str = Field(alias="routeSummary")
+    meeting_point: str = Field(alias="meetingPoint")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class AdminSafariDetail(BaseModel):
+    national_park: str = Field(alias="nationalPark")
+    safari_type: SafariType = Field(alias="safariType")
+    duration_minutes: int = Field(alias="durationMinutes")
+    guide_included: bool = Field(alias="guideIncluded")
+    pickup_supported: bool = Field(default=False, alias="pickupSupported")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class AdminTransferDetail(BaseModel):
+    origin_type: TransferLocationType = Field(alias="originType")
+    destination_type: DestinationType = Field(alias="destinationType")
+    vehicle_policy: str = Field(alias="vehiclePolicy")
+
+    model_config = ConfigDict(populate_by_name=True)
+
 
 class AdminListingBase(CoordinateMixin):
-    destinationId: UUID
+    destination_id: UUID = Field(alias="destinationId")
     title: str
-    location: str | None = None
-    description: str
-    image: str | None = None
-    rating: float | None = None
-    reviewCount: float | None = None
-    cancellationPolicy: str | None = None
-    includes: list[str] = []
-    recommendation: str | None = None
-    isActive: bool = True
+    description: str | None = None
+    is_active: bool = Field(default=True, alias="isActive")
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class StayListingCreate(AdminListingBase):
-    rooms: list[RoomItem] = []
-    reviewMetrics: list[ReviewMetricItem] = []
-    guestReviews: list[GuestReviewItem] = []
+    hotel_detail: AdminHotelDetail = Field(alias="hotelDetail")
 
 
-class StayListingResponse(StayListingCreate):
+class StayListingResponse(AdminListingBase):
     id: UUID
     category: Literal["stay"]
     destination: DestinationRef | None = None
+    hotel_detail: AdminHotelDetail | None = Field(default=None, alias="hotelDetail")
 
 
 class TourListingCreate(AdminListingBase):
-    duration: str | None = None
-    route: str | None = None
-    price: float | None = None
-    highlights: list[str] = []
+    tour_detail: AdminTourDetail = Field(alias="tourDetail")
 
 
-class TourListingResponse(TourListingCreate):
+class TourListingResponse(AdminListingBase):
     id: UUID
     category: Literal["tour"]
     destination: DestinationRef | None = None
+    tour_detail: AdminTourDetail | None = Field(default=None, alias="tourDetail")
 
 
 class ActivityListingCreate(AdminListingBase):
-    duration: str | None = None
-    activityType: str | None = None
-    difficulty: str | None = None
-    price: float | None = None
-    highlights: list[str] = []
+    safari_detail: AdminSafariDetail = Field(alias="safariDetail")
 
 
-class ActivityListingResponse(ActivityListingCreate):
+class ActivityListingResponse(AdminListingBase):
     id: UUID
     category: Literal["activity"]
     destination: DestinationRef | None = None
+    safari_detail: AdminSafariDetail | None = Field(default=None, alias="safariDetail")
 
 
 class TransferListingCreate(AdminListingBase):
-    origin: str | None = None
-    destinationLabel: str | None = None
-    vehicleType: str | None = None
-    price: float | None = None
-    serviceHighlights: list[str] = []
+    transfer_detail: AdminTransferDetail = Field(alias="transferDetail")
 
 
-class TransferListingResponse(TransferListingCreate):
+class TransferListingResponse(AdminListingBase):
     id: UUID
     category: Literal["transfer"]
     destination: DestinationRef | None = None
+    transfer_detail: AdminTransferDetail | None = Field(default=None, alias="transferDetail")
 
 
 class ListingUpdateRequest(CoordinateMixin):
-    destinationId: UUID | None = None
+    destination_id: UUID | None = Field(default=None, alias="destinationId")
     title: str | None = None
-    location: str | None = None
     description: str | None = None
-    image: str | None = None
-    rating: float | None = None
-    reviewCount: float | None = None
-    cancellationPolicy: str | None = None
-    includes: list[str] | None = None
-    recommendation: str | None = None
-    isActive: bool | None = None
-    rooms: list[RoomItem] | None = None
-    reviewMetrics: list[ReviewMetricItem] | None = None
-    guestReviews: list[GuestReviewItem] | None = None
-    duration: str | None = None
-    route: str | None = None
-    price: float | None = None
-    highlights: list[str] | None = None
-    activityType: str | None = None
-    difficulty: str | None = None
-    origin: str | None = None
-    destinationLabel: str | None = None
-    vehicleType: str | None = None
-    serviceHighlights: list[str] | None = None
+    is_active: bool | None = Field(default=None, alias="isActive")
+    hotel_detail: AdminHotelDetail | None = Field(default=None, alias="hotelDetail")
+    tour_detail: AdminTourDetail | None = Field(default=None, alias="tourDetail")
+    safari_detail: AdminSafariDetail | None = Field(default=None, alias="safariDetail")
+    transfer_detail: AdminTransferDetail | None = Field(default=None, alias="transferDetail")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @model_validator(mode="after")
+    def validate_single_detail_payload(self):
+        populated_details = [
+            detail
+            for detail in [
+                self.hotel_detail,
+                self.tour_detail,
+                self.safari_detail,
+                self.transfer_detail,
+            ]
+            if detail is not None
+        ]
+        if len(populated_details) > 1:
+            raise ValueError("only one detail payload can be provided")
+        return self

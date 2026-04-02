@@ -1,9 +1,17 @@
-from datetime import datetime
+from datetime import datetime, time
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.models.enum import CurrencyCode, DestinationType, ListingStatus, ListingType
+from app.models.enum import (
+    CurrencyCode,
+    DestinationType,
+    ListingStatus,
+    ListingType,
+    PropertyType,
+    SafariType,
+    TransferLocationType,
+)
 
 
 class DestinationMapResponse(BaseModel):
@@ -27,6 +35,88 @@ class CoordinateMixin(BaseModel):
         return self
 
 
+class HotelDetailBase(BaseModel):
+    property_type: PropertyType
+    star_rating: int
+    check_in_time: time
+    check_out_time: time
+    child_policy: str | None = None
+
+
+class HotelDetailUpdate(BaseModel):
+    property_type: PropertyType | None = None
+    star_rating: int | None = None
+    check_in_time: time | None = None
+    check_out_time: time | None = None
+    child_policy: str | None = None
+
+
+class HotelDetailResponse(HotelDetailBase):
+    id: UUID
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TourDetailBase(BaseModel):
+    duration_days: int
+    route_summary: str
+    meeting_point: str
+
+
+class TourDetailUpdate(BaseModel):
+    duration_days: int | None = None
+    route_summary: str | None = None
+    meeting_point: str | None = None
+
+
+class TourDetailResponse(TourDetailBase):
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SafariDetailBase(BaseModel):
+    national_park: str
+    safari_type: SafariType
+    duration_minutes: int
+    guide_included: bool
+    pickup_supported: bool = False
+
+
+class SafariDetailUpdate(BaseModel):
+    national_park: str | None = None
+    safari_type: SafariType | None = None
+    duration_minutes: int | None = None
+    guide_included: bool | None = None
+    pickup_supported: bool | None = None
+
+
+class SafariDetailResponse(SafariDetailBase):
+    id: UUID
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TransferDetailBase(BaseModel):
+    origin_type: TransferLocationType
+    destination_type: DestinationType
+    vehicle_policy: str
+
+
+class TransferDetailUpdate(BaseModel):
+    origin_type: TransferLocationType | None = None
+    destination_type: DestinationType | None = None
+    vehicle_policy: str | None = None
+
+
+class TransferDetailResponse(TransferDetailBase):
+    id: UUID
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ListingBase(CoordinateMixin):
     listing_type: ListingType
     destination_id: UUID
@@ -36,6 +126,36 @@ class ListingBase(CoordinateMixin):
     status: ListingStatus = ListingStatus.DRAFT
     base_currency: CurrencyCode = CurrencyCode.LKR
     is_active: bool = True
+    hotel_detail: HotelDetailBase | None = None
+    tour_detail: TourDetailBase | None = None
+    safari_detail: SafariDetailBase | None = None
+    transfer_detail: TransferDetailBase | None = None
+
+    @model_validator(mode="after")
+    def validate_matching_detail(self):
+        detail_fields = {
+            ListingType.HOTEL: self.hotel_detail,
+            ListingType.TOUR: self.tour_detail,
+            ListingType.SAFARI: self.safari_detail,
+            ListingType.TRANSFER: self.transfer_detail,
+        }
+        expected_detail = detail_fields[self.listing_type]
+        if expected_detail is None:
+            raise ValueError(f"{self.listing_type.value} listings require the matching detail payload")
+
+        mismatched = [
+            name
+            for name, detail in {
+                "hotel_detail": self.hotel_detail,
+                "tour_detail": self.tour_detail,
+                "safari_detail": self.safari_detail,
+                "transfer_detail": self.transfer_detail,
+            }.items()
+            if detail is not None
+        ]
+        if len(mismatched) > 1:
+            raise ValueError("only one detail payload can be provided")
+        return self
 
 
 class ListingCreate(ListingBase):
@@ -51,6 +171,26 @@ class ListingUpdate(CoordinateMixin):
     status: ListingStatus | None = None
     base_currency: CurrencyCode | None = None
     is_active: bool | None = None
+    hotel_detail: HotelDetailUpdate | None = None
+    tour_detail: TourDetailUpdate | None = None
+    safari_detail: SafariDetailUpdate | None = None
+    transfer_detail: TransferDetailUpdate | None = None
+
+    @model_validator(mode="after")
+    def validate_single_detail_payload(self):
+        populated = [
+            name
+            for name, detail in {
+                "hotel_detail": self.hotel_detail,
+                "tour_detail": self.tour_detail,
+                "safari_detail": self.safari_detail,
+                "transfer_detail": self.transfer_detail,
+            }.items()
+            if detail is not None
+        ]
+        if len(populated) > 1:
+            raise ValueError("only one detail payload can be provided")
+        return self
 
 
 class ListingResponse(BaseModel):
@@ -66,6 +206,10 @@ class ListingResponse(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
     destination: DestinationMapResponse | None = None
+    hotel_detail: HotelDetailResponse | None = None
+    tour_detail: TourDetailResponse | None = None
+    safari_detail: SafariDetailResponse | None = None
+    transfer_detail: TransferDetailResponse | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -89,6 +233,7 @@ class ListingSearchParams(BaseModel):
     destination_id: UUID | None = None
     title: str | None = None
     base_currency: CurrencyCode | None = None
+    status: ListingStatus | None = None
     is_active: bool | None = None
     page: int = 1
     per_page: int = 20

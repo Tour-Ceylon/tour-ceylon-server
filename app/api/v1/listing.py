@@ -7,13 +7,13 @@ import math
 from app.config.database import get_db
 from app.repositories.listing_repo import ListingRepository
 from app.schemas.listing_schema import (
-    ListingCreate, 
-    ListingUpdate, 
-    ListingResponse, 
-    ListingListResponse, 
-    ListingSearchParams
+    ListingCreate,
+    ListingUpdate,
+    ListingResponse,
+    ListingListResponse,
+    ListingSearchParams,
 )
-from app.models.enum import CurrencyCode, ListingType
+from app.models.enum import ListingType
 
 router = APIRouter()
 
@@ -87,14 +87,19 @@ async def get_listing_by_slug(
 async def get_listings(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
-    is_active: bool = Query(None),
+    is_active: bool | None = Query(None),
     db: Session = Depends(get_db),
     listing_repo: ListingRepository = Depends(get_listing_repository)
 ):
     """Get all listings with pagination"""
     
     listings = listing_repo.get_all(skip=skip, limit=limit, is_active=is_active)
-    total = listing_repo.count_active() if is_active else len(listings)
+    if is_active is None:
+        total = listing_repo.count_active() + listing_repo.count_inactive()
+    elif is_active:
+        total = listing_repo.count_active()
+    else:
+        total = listing_repo.count_inactive()
     
     return ListingListResponse(
         listings=listings,

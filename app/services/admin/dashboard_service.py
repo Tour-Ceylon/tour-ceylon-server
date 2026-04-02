@@ -1,7 +1,8 @@
-from uuid import UUID, uuid4
+from datetime import time
+from uuid import UUID
 
 from fastapi import status
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from app.api.errors import AdminAPIError
 from app.models.destination import Destination
@@ -33,13 +34,7 @@ class AdminDashboardService:
 
     def get_snapshot(self) -> dict:
         listing_groups = {"stay": [], "tour": [], "activity": [], "transfer": []}
-        listings = (
-            self.db.query(Listing)
-            .options(joinedload(Listing.destination))
-            .order_by(Listing.created_at.desc())
-            .all()
-        )
-        for listing in listings:
+        for listing in self.listings.get_all_listings():
             category = self.CATEGORY_BY_LISTING_TYPE.get(listing.listing_type)
             if category in listing_groups:
                 listing_groups[category].append(self._build_listing_response(listing))
@@ -95,25 +90,23 @@ class AdminDashboardService:
     def create_listing(self, category: str, payload: dict) -> dict:
         category = self._validate_category(category)
         listing = self.listings.create_listing(self._listing_model_data(category, payload))
-        listing = self._get_listing_with_destination(listing.id)
         return self._build_listing_response(listing)
 
     def update_listing(self, category: str, listing_id: UUID, payload: dict) -> dict:
         category = self._validate_category(category)
-        listing = self._get_listing_with_destination(listing_id)
+        listing = self.listings.get_listing(listing_id)
         if listing is None or listing.listing_type != self.LISTING_TYPE_MAP[category]:
             raise self._not_found("Listing not found")
 
         listing_updates = self._listing_model_data(category, payload, partial=True)
-        if listing_updates:
-            self.listings.update_listing(listing, listing_updates)
-
-        listing = self._get_listing_with_destination(listing_id)
-        return self._build_listing_response(listing)
+        updated = self.listings.update_listing(listing_id, listing_updates)
+        if updated is None:
+            raise self._not_found("Listing not found")
+        return self._build_listing_response(updated)
 
     def delete_listing(self, category: str, listing_id: UUID) -> None:
         category = self._validate_category(category)
-        listing = self._get_listing_with_destination(listing_id)
+        listing = self.listings.get_listing(listing_id)
         if listing is None or listing.listing_type != self.LISTING_TYPE_MAP[category]:
             raise self._not_found("Listing not found")
 
@@ -148,14 +141,6 @@ class AdminDashboardService:
         self.packages.delete_all()
         self.addons.delete_all()
         return self.get_snapshot()
-
-    def _get_listing_with_destination(self, listing_id: UUID) -> Listing | None:
-        return (
-            self.db.query(Listing)
-            .options(joinedload(Listing.destination))
-            .filter(Listing.id == listing_id)
-            .first()
-        )
 
     def _validate_destination_id(self, destination_id: UUID) -> None:
         if self.db.get(Destination, destination_id) is None:
@@ -227,32 +212,60 @@ class AdminDashboardService:
         return aliases.get(normalized, normalized)
 
     def _listing_model_data(self, category: str, payload: dict, partial: bool = False) -> dict:
-        destination_id = payload.get("destinationId")
+        destination_id = payload.get("destination_id")
         if destination_id is not None:
             self._validate_destination_id(destination_id)
         elif not partial:
             raise AdminAPIError(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                message="destinationId is required",
+                message="destination_id is required",
             )
-
-        is_active = payload.get("isActive", True) if not partial or "isActive" in payload else None
 
         model_data = {
             "listing_type": self.LISTING_TYPE_MAP[category],
             "destination_id": destination_id,
             "title": payload.get("title"),
-            "slug": self._slugify(payload.get("title")) if payload.get("title") else None,
+            "slug": payload.get("slug"),
             "description": payload.get("description"),
             "latitude": payload.get("latitude"),
             "longitude": payload.get("longitude"),
-            "is_active": is_active,
-            "base_currency": CurrencyCode.LKR,
+            "is_active": payload.get("is_active"),
+            "base_currency": payload.get("base_currency", CurrencyCode.LKR),
         }
+
+        detail_key = self._detail_key_for_category(category)
+        if detail_key in payload and payload[detail_key] is not None:
+            model_data[detail_key] = self._normalize_detail_payload(detail_key, payload[detail_key])
 
         if partial:
             return {key: value for key, value in model_data.items() if value is not None}
         return model_data
+
+    def _normalize_detail_payload(self, detail_key: str, detail_payload: dict) -> dict:
+        normalized = dict(detail_payload)
+        if detail_key == "hotel_detail":
+            normalized["check_in_time"] = self._parse_time(normalized["check_in_time"])
+            normalized["check_out_time"] = self._parse_time(normalized["check_out_time"])
+        return normalized
+
+    def _parse_time(self, raw_value: str | time) -> time:
+        if isinstance(raw_value, time):
+            return raw_value
+        try:
+            return time.fromisoformat(raw_value)
+        except ValueError as exc:
+            raise AdminAPIError(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                message=f"Invalid time value: {raw_value}",
+            ) from exc
+
+    def _detail_key_for_category(self, category: str) -> str:
+        return {
+            "stay": "hotel_detail",
+            "tour": "tour_detail",
+            "activity": "safari_detail",
+            "transfer": "transfer_detail",
+        }[category]
 
     def _build_package_response(self, package) -> dict:
         return build_package_response(package)
@@ -269,36 +282,75 @@ class AdminDashboardService:
             "category": category,
         }
 
-    def _build_listing_response(self, listing) -> dict:
-        category = self.CATEGORY_BY_LISTING_TYPE.get(listing.listing_type, listing.listing_type.value)
+    def _build_listing_response(self, listing: Listing) -> dict:
         payload = {
             "id": listing.id,
-            "category": category,
-            "destinationId": listing.destination_id,
+            "category": self.CATEGORY_BY_LISTING_TYPE.get(listing.listing_type, listing.listing_type.value),
+            "destination_id": listing.destination_id,
             "title": listing.title,
             "description": listing.description,
-            "location": listing.destination.name if listing.destination else None,
-            "isActive": listing.is_active,
+            "is_active": listing.is_active,
             "latitude": listing.latitude,
             "longitude": listing.longitude,
             "destination": {
                 "id": listing.destination.id,
                 "name": listing.destination.name,
+                "destination_type": listing.destination.destination_type,
                 "latitude": listing.destination.latitude,
                 "longitude": listing.destination.longitude,
-            } if listing.destination else None,
-            "rooms": [],
-            "reviewMetrics": [],
-            "guestReviews": [],
-            "highlights": [],
-            "serviceHighlights": [],
+            }
+            if listing.destination
+            else None,
+            "hotel_detail": self._build_hotel_detail(listing),
+            "tour_detail": self._build_tour_detail(listing),
+            "safari_detail": self._build_safari_detail(listing),
+            "transfer_detail": self._build_transfer_detail(listing),
         }
-        return {k: v for k, v in payload.items() if v is not None}
+        return {key: value for key, value in payload.items() if value is not None}
 
-    def _slugify(self, value: str | None) -> str | None:
-        if not value:
+    def _build_hotel_detail(self, listing: Listing) -> dict | None:
+        detail = listing.hotel_detail
+        if detail is None:
             return None
-        return f"{'-'.join(value.lower().split())}-{str(uuid4())[:8]}"
+        return {
+            "property_type": detail.property_type,
+            "star_rating": detail.star_rating,
+            "check_in_time": detail.check_in_time.isoformat(),
+            "check_out_time": detail.check_out_time.isoformat(),
+            "child_policy": detail.child_policy,
+        }
+
+    def _build_tour_detail(self, listing: Listing) -> dict | None:
+        detail = listing.tour_detail
+        if detail is None:
+            return None
+        return {
+            "duration_days": detail.duration_days,
+            "route_summary": detail.route_summary,
+            "meeting_point": detail.meeting_point,
+        }
+
+    def _build_safari_detail(self, listing: Listing) -> dict | None:
+        detail = listing.safari_detail
+        if detail is None:
+            return None
+        return {
+            "national_park": detail.national_park,
+            "safari_type": detail.safari_type,
+            "duration_minutes": detail.duration_minutes,
+            "guide_included": detail.guide_included,
+            "pickup_supported": detail.pickup_supported,
+        }
+
+    def _build_transfer_detail(self, listing: Listing) -> dict | None:
+        detail = listing.transfer_detail
+        if detail is None:
+            return None
+        return {
+            "origin_type": detail.origin_type,
+            "destination_type": detail.destination_type,
+            "vehicle_policy": detail.vehicle_policy,
+        }
 
     def _not_found(self, message: str) -> AdminAPIError:
         return AdminAPIError(status_code=status.HTTP_404_NOT_FOUND, message=message)
