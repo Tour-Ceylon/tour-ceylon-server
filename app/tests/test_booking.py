@@ -153,6 +153,47 @@ def test_create_listing_returns_nested_hotel_detail(client, db_session):
     assert payload["destination"]["name"] == "Kandy"
 
 
+def test_active_listings_endpoint_is_not_captured_by_id_route(client, db_session):
+    destination = Destination(
+        name="Ella",
+        destination_type=DestinationType.CITY,
+        latitude=6.8667,
+        longitude=81.0466,
+    )
+    db_session.add(destination)
+    db_session.flush()
+
+    active_listing = Listing(
+        destination_id=destination.id,
+        listing_type=ListingType.HOTEL,
+        title="Active Stay",
+        slug=f"active-stay-{uuid4()}",
+        description="Visible listing",
+        status=ListingStatus.PUBLISHED,
+        base_currency=CurrencyCode.LKR,
+        is_active=True,
+    )
+    inactive_listing = Listing(
+        destination_id=destination.id,
+        listing_type=ListingType.HOTEL,
+        title="Inactive Stay",
+        slug=f"inactive-stay-{uuid4()}",
+        description="Hidden listing",
+        status=ListingStatus.DRAFT,
+        base_currency=CurrencyCode.LKR,
+        is_active=False,
+    )
+    db_session.add_all([active_listing, inactive_listing])
+    db_session.commit()
+
+    response = client.get("/listings/active")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0]["title"] == "Active Stay"
+
+
 def test_create_booking_returns_nested_items_and_travelers(client, booking_seed):
     response = client.post(
         "/bookings/",
@@ -191,3 +232,40 @@ def test_create_booking_returns_nested_items_and_travelers(client, booking_seed)
     assert payload["booking_reference"] == "BK-1001"
     assert payload["booking_items"][0]["listing_id"] == str(booking_seed["listing"].id)
     assert payload["booking_items"][0]["travelers"][0]["first_name"] == "Asha"
+
+
+def test_booking_stats_uses_model_first_aggregate_field_names(client, booking_seed):
+    create_response = client.post(
+        "/bookings/",
+        json={
+            "booking_reference": "BK-1002",
+            "user_id": str(booking_seed["user"].id),
+            "status": "confirmed",
+            "total_amount": "500.00",
+            "currency": "LKR",
+            "payment_status": "succeeded",
+            "booked_at": "2026-04-04T10:30:00",
+            "booking_items": [
+                {
+                    "listing_id": str(booking_seed["listing"].id),
+                    "variant_id": str(booking_seed["variant"].id),
+                    "travel_date": "2026-04-20",
+                    "quantity": 1,
+                    "unit_price": 500.0,
+                    "total_price": 500.0,
+                    "travelers": [],
+                }
+            ],
+        },
+    )
+    assert create_response.status_code == 201
+
+    summary_response = client.get("/bookings/stats/summary")
+    revenue_response = client.get("/bookings/stats/revenue")
+
+    assert summary_response.status_code == 200
+    assert revenue_response.status_code == 200
+    assert "pending" in summary_response.json()
+    assert "total_revenue" in summary_response.json()
+    assert "total_revenue" in revenue_response.json()
+    assert "total_revenue_minor" not in revenue_response.json()

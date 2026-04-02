@@ -13,7 +13,7 @@ from app.schemas.listing_schema import (
     ListingListResponse,
     ListingSearchParams,
 )
-from app.models.enum import ListingType
+from app.models.enum import CurrencyCode, ListingType
 
 router = APIRouter()
 
@@ -45,42 +45,6 @@ async def create_listing(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create listing"
         )
-
-
-@router.get("/{listing_id}", response_model=ListingResponse)
-async def get_listing(
-    listing_id: UUID,
-    db: Session = Depends(get_db),
-    listing_repo: ListingRepository = Depends(get_listing_repository)
-):
-    """Get listing by ID"""
-    
-    listing = listing_repo.get_by_id(listing_id)
-    if not listing:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Listing not found"
-        )
-    
-    return listing
-
-
-@router.get("/slug/{slug}", response_model=ListingResponse)
-async def get_listing_by_slug(
-    slug: str,
-    db: Session = Depends(get_db),
-    listing_repo: ListingRepository = Depends(get_listing_repository)
-):
-    """Get listing by slug"""
-    
-    listing = listing_repo.get_by_slug(slug)
-    if not listing:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Listing not found"
-        )
-    
-    return listing
 
 
 @router.get("/", response_model=ListingListResponse)
@@ -255,6 +219,7 @@ async def get_active_listings(
     listings = listing_repo.get_active()
     return listings
 
+
 @router.get("/inactive", response_model=List[ListingResponse])
 async def get_inactive_listings(
     db: Session = Depends(get_db),
@@ -336,3 +301,39 @@ async def get_listing_stats(
         "inactive_listings": inactive_count,
         "total_listings": active_count + inactive_count
     }
+
+
+@router.get("/slug/{slug}", response_model=ListingResponse)
+async def get_listing_by_slug(
+    slug: str,
+    db: Session = Depends(get_db),
+    listing_repo: ListingRepository = Depends(get_listing_repository)
+):
+    """Get listing by slug"""
+
+    listing = listing_repo.get_by_slug(slug)
+    if not listing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Listing not found"
+        )
+
+    return listing
+
+
+@router.get("/{listing_id}", response_model=ListingResponse)
+async def get_listing(
+    listing_id: UUID,
+    db: Session = Depends(get_db),
+    listing_repo: ListingRepository = Depends(get_listing_repository)
+):
+    """Get listing by ID"""
+
+    listing = listing_repo.get_by_id(listing_id)
+    if not listing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Listing not found"
+        )
+
+    return listing

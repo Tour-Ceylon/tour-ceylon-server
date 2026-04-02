@@ -23,11 +23,11 @@ class CoordinateMixin(BaseModel):
 class DestinationRef(BaseModel):
     id: UUID
     name: str
-    destination_type: DestinationType
+    destination_type: DestinationType = Field(alias="destinationType")
     latitude: float | None = None
     longitude: float | None = None
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True, serialize_by_alias=True)
 
 
 class AdminHotelDetail(BaseModel):
@@ -37,7 +37,7 @@ class AdminHotelDetail(BaseModel):
     check_out_time: str = Field(alias="checkOutTime")
     child_policy: str | None = Field(default=None, alias="childPolicy")
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
 
 class AdminTourDetail(BaseModel):
@@ -45,7 +45,7 @@ class AdminTourDetail(BaseModel):
     route_summary: str = Field(alias="routeSummary")
     meeting_point: str = Field(alias="meetingPoint")
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
 
 class AdminSafariDetail(BaseModel):
@@ -55,7 +55,7 @@ class AdminSafariDetail(BaseModel):
     guide_included: bool = Field(alias="guideIncluded")
     pickup_supported: bool = Field(default=False, alias="pickupSupported")
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
 
 class AdminTransferDetail(BaseModel):
@@ -63,7 +63,7 @@ class AdminTransferDetail(BaseModel):
     destination_type: DestinationType = Field(alias="destinationType")
     vehicle_policy: str = Field(alias="vehiclePolicy")
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
 
 class AdminListingBase(CoordinateMixin):
@@ -72,7 +72,7 @@ class AdminListingBase(CoordinateMixin):
     description: str | None = None
     is_active: bool = Field(default=True, alias="isActive")
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
 
 class StayListingCreate(AdminListingBase):
@@ -129,7 +129,7 @@ class ListingUpdateRequest(CoordinateMixin):
     safari_detail: AdminSafariDetail | None = Field(default=None, alias="safariDetail")
     transfer_detail: AdminTransferDetail | None = Field(default=None, alias="transferDetail")
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
     @model_validator(mode="after")
     def validate_single_detail_payload(self):

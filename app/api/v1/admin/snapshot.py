@@ -7,7 +7,6 @@ from app.services.admin.dashboard_service import AdminDashboardService
 router = APIRouter()
 
 
-@router.get("/snapshot", response_model=AdminSnapshotResponse)
+@router.get("/snapshot", response_model=AdminSnapshotResponse, response_model_by_alias=True)
 async def get_snapshot(service: AdminDashboardService = Depends(get_admin_service)):
     return service.get_snapshot()
-
