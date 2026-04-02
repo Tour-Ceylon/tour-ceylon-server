@@ -28,7 +28,12 @@ class Listing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     )
 
     destination = relationship("Destination", back_populates="listings")
-    media = relationship("ListingMedia", back_populates="listing", cascade="all, delete-orphan")
+    media = relationship(
+        "ListingMedia",
+        back_populates="listing",
+        cascade="all, delete-orphan",
+        order_by="ListingMedia.sort_order",
+    )
     variants = relationship("ListingVariant", back_populates="listing", cascade="all, delete-orphan")
     reviews = relationship("Review", back_populates="listing")
     wishlisted_by = relationship("Wishlist", back_populates="listing", cascade="all, delete-orphan")

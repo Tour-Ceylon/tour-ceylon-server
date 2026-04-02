@@ -231,6 +231,7 @@ class AdminDashboardService:
             "longitude": payload.get("longitude"),
             "is_active": payload.get("is_active"),
             "base_currency": payload.get("base_currency", CurrencyCode.LKR),
+            "media": self._normalize_media_payload(payload.get("media")) if "media" in payload else ([] if not partial else None),
         }
 
         detail_key = self._detail_key_for_category(category)
@@ -247,6 +248,23 @@ class AdminDashboardService:
             normalized["check_in_time"] = self._parse_time(normalized["check_in_time"])
             normalized["check_out_time"] = self._parse_time(normalized["check_out_time"])
         return normalized
+
+    def _normalize_media_payload(self, media_payload: list[dict] | None) -> list[dict] | None:
+        if media_payload is None:
+            return None
+
+        normalized_media = []
+        for media in media_payload:
+            normalized_media.append(
+                {
+                    "url": media["url"],
+                    "alt_text": media.get("alt_text", media.get("altText")),
+                    "sort_order": media.get("sort_order", media.get("sortOrder")),
+                    "is_cover": media.get("is_cover", media.get("isCover", False)),
+                    "media_type": media.get("media_type", media.get("mediaType")),
+                }
+            )
+        return normalized_media
 
     def _parse_time(self, raw_value: str | time) -> time:
         if isinstance(raw_value, time):
@@ -292,6 +310,17 @@ class AdminDashboardService:
             "is_active": listing.is_active,
             "latitude": listing.latitude,
             "longitude": listing.longitude,
+            "media": [
+                {
+                    "id": media.id,
+                    "url": media.url,
+                    "alt_text": media.alt_text,
+                    "sort_order": media.sort_order,
+                    "is_cover": media.is_cover,
+                    "media_type": media.media_type,
+                }
+                for media in listing.media
+            ],
             "destination": {
                 "id": listing.destination.id,
                 "name": listing.destination.name,

@@ -23,6 +23,7 @@ class AdminDashboardListingRepository:
             self.db.query(Listing)
             .options(
                 joinedload(Listing.destination),
+                joinedload(Listing.media),
                 joinedload(Listing.hotel_detail),
                 joinedload(Listing.tour_detail),
                 joinedload(Listing.safari_detail),

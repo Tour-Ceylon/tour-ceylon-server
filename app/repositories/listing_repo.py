@@ -8,6 +8,7 @@ from app.models.destination import Destination
 from app.models.enum import CurrencyCode, ListingType
 from app.models.hotelDetail import HotelDetail
 from app.models.listing import Listing
+from app.models.listingMedia import ListingMedia
 from app.models.safariDetail import SafariDetail
 from app.models.tourDetail import TourDetail
 from app.models.transferDetail import TransferDetail
@@ -36,6 +37,7 @@ class ListingRepository:
         "base_currency",
         "is_active",
     }
+    MEDIA_FIELD = "media"
 
     def __init__(self, db: Session):
         self.db = db
@@ -43,6 +45,7 @@ class ListingRepository:
     def _base_query(self):
         return self.db.query(Listing).options(
             joinedload(Listing.destination),
+            joinedload(Listing.media),
             joinedload(Listing.hotel_detail),
             joinedload(Listing.tour_detail),
             joinedload(Listing.safari_detail),
@@ -57,6 +60,7 @@ class ListingRepository:
         self.db.flush()
 
         self._sync_detail(db_listing, db_listing.listing_type, payload)
+        self._sync_media(db_listing, payload.get(self.MEDIA_FIELD))
 
         self.db.commit()
         self.db.refresh(db_listing)
@@ -119,6 +123,7 @@ class ListingRepository:
         update_data = listing_data.model_dump(exclude_unset=True)
         detail_data = {key: value for key, value in update_data.items() if key in self.DETAIL_FIELDS}
         base_update_data = {key: value for key, value in update_data.items() if key in self.BASE_FIELDS}
+        media_data = update_data.get(self.MEDIA_FIELD) if self.MEDIA_FIELD in update_data else None
 
         previous_type = db_listing.listing_type
         for field, value in base_update_data.items():
@@ -130,6 +135,9 @@ class ListingRepository:
 
         if detail_data or previous_type != active_type:
             self._sync_detail(db_listing, active_type, update_data)
+
+        if self.MEDIA_FIELD in update_data:
+            self._sync_media(db_listing, media_data)
 
         self.db.commit()
         self.db.refresh(db_listing)
@@ -266,6 +274,20 @@ class ListingRepository:
         existing_detail = getattr(listing, relation_name)
         if existing_detail is not None:
             self.db.delete(existing_detail)
+
+    def _sync_media(self, listing: Listing, media_payload: list[dict] | None) -> None:
+        if media_payload is None:
+            return
+
+        for existing_media in list(listing.media):
+            self.db.delete(existing_media)
+
+        self.db.flush()
+
+        for media_item in media_payload:
+            media = ListingMedia(listing_id=listing.id, **media_item)
+            self.db.add(media)
+            listing.media.append(media)
 
 
 def get_listing_repository(db: Session = None) -> ListingRepository:

@@ -10,6 +10,7 @@ from app.models.enum import (
     ListingType,
     PropertyType,
     SafariType,
+    MediaType,
     TransferLocationType,
 )
 
@@ -117,6 +118,26 @@ class TransferDetailResponse(TransferDetailBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ListingMediaBase(BaseModel):
+    url: str = Field(min_length=1)
+    alt_text: str = Field(min_length=1)
+    sort_order: int
+    is_cover: bool = False
+    media_type: MediaType = MediaType.IMAGE
+
+
+class ListingMediaCreate(ListingMediaBase):
+    pass
+
+
+class ListingMediaResponse(ListingMediaBase):
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ListingBase(CoordinateMixin):
     listing_type: ListingType
     destination_id: UUID
@@ -130,6 +151,7 @@ class ListingBase(CoordinateMixin):
     tour_detail: TourDetailBase | None = None
     safari_detail: SafariDetailBase | None = None
     transfer_detail: TransferDetailBase | None = None
+    media: list[ListingMediaCreate] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_matching_detail(self):
@@ -157,6 +179,12 @@ class ListingBase(CoordinateMixin):
             raise ValueError("only one detail payload can be provided")
         return self
 
+    @model_validator(mode="after")
+    def validate_media_cover(self):
+        if sum(1 for media in self.media if media.is_cover) > 1:
+            raise ValueError("only one media item can be marked as cover")
+        return self
+
 
 class ListingCreate(ListingBase):
     pass
@@ -175,6 +203,7 @@ class ListingUpdate(CoordinateMixin):
     tour_detail: TourDetailUpdate | None = None
     safari_detail: SafariDetailUpdate | None = None
     transfer_detail: TransferDetailUpdate | None = None
+    media: list[ListingMediaCreate] | None = None
 
     @model_validator(mode="after")
     def validate_single_detail_payload(self):
@@ -190,6 +219,12 @@ class ListingUpdate(CoordinateMixin):
         ]
         if len(populated) > 1:
             raise ValueError("only one detail payload can be provided")
+        return self
+
+    @model_validator(mode="after")
+    def validate_media_cover(self):
+        if self.media is not None and sum(1 for media in self.media if media.is_cover) > 1:
+            raise ValueError("only one media item can be marked as cover")
         return self
 
 
@@ -210,6 +245,7 @@ class ListingResponse(BaseModel):
     tour_detail: TourDetailResponse | None = None
     safari_detail: SafariDetailResponse | None = None
     transfer_detail: TransferDetailResponse | None = None
+    media: list[ListingMediaResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

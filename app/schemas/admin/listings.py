@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.models.enum import DestinationType, PropertyType, SafariType, TransferLocationType
+from app.models.enum import DestinationType, MediaType, PropertyType, SafariType, TransferLocationType
 
 
 AdminListingCategory = Literal["stay", "tour", "activity", "transfer"]
@@ -66,13 +66,34 @@ class AdminTransferDetail(BaseModel):
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
 
+class AdminListingMedia(BaseModel):
+    url: str = Field(min_length=1)
+    alt_text: str = Field(alias="altText", min_length=1)
+    sort_order: int = Field(alias="sortOrder")
+    is_cover: bool = Field(default=False, alias="isCover")
+    media_type: MediaType = Field(default=MediaType.IMAGE, alias="mediaType")
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+
+class AdminListingMediaResponse(AdminListingMedia):
+    id: UUID
+
+
 class AdminListingBase(CoordinateMixin):
     destination_id: UUID = Field(alias="destinationId")
     title: str
     description: str | None = None
     is_active: bool = Field(default=True, alias="isActive")
+    media: list[AdminListingMedia] = Field(default_factory=list)
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    @model_validator(mode="after")
+    def validate_media_cover(self):
+        if sum(1 for media in self.media if media.is_cover) > 1:
+            raise ValueError("only one media item can be marked as cover")
+        return self
 
 
 class StayListingCreate(AdminListingBase):
@@ -83,6 +104,7 @@ class StayListingResponse(AdminListingBase):
     id: UUID
     category: Literal["stay"]
     destination: DestinationRef | None = None
+    media: list[AdminListingMediaResponse] = Field(default_factory=list)
     hotel_detail: AdminHotelDetail | None = Field(default=None, alias="hotelDetail")
 
 
@@ -94,6 +116,7 @@ class TourListingResponse(AdminListingBase):
     id: UUID
     category: Literal["tour"]
     destination: DestinationRef | None = None
+    media: list[AdminListingMediaResponse] = Field(default_factory=list)
     tour_detail: AdminTourDetail | None = Field(default=None, alias="tourDetail")
 
 
@@ -105,6 +128,7 @@ class ActivityListingResponse(AdminListingBase):
     id: UUID
     category: Literal["activity"]
     destination: DestinationRef | None = None
+    media: list[AdminListingMediaResponse] = Field(default_factory=list)
     safari_detail: AdminSafariDetail | None = Field(default=None, alias="safariDetail")
 
 
@@ -116,6 +140,7 @@ class TransferListingResponse(AdminListingBase):
     id: UUID
     category: Literal["transfer"]
     destination: DestinationRef | None = None
+    media: list[AdminListingMediaResponse] = Field(default_factory=list)
     transfer_detail: AdminTransferDetail | None = Field(default=None, alias="transferDetail")
 
 
@@ -128,6 +153,7 @@ class ListingUpdateRequest(CoordinateMixin):
     tour_detail: AdminTourDetail | None = Field(default=None, alias="tourDetail")
     safari_detail: AdminSafariDetail | None = Field(default=None, alias="safariDetail")
     transfer_detail: AdminTransferDetail | None = Field(default=None, alias="transferDetail")
+    media: list[AdminListingMedia] | None = None
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
@@ -145,4 +171,10 @@ class ListingUpdateRequest(CoordinateMixin):
         ]
         if len(populated_details) > 1:
             raise ValueError("only one detail payload can be provided")
+        return self
+
+    @model_validator(mode="after")
+    def validate_media_cover(self):
+        if self.media is not None and sum(1 for media in self.media if media.is_cover) > 1:
+            raise ValueError("only one media item can be marked as cover")
         return self
