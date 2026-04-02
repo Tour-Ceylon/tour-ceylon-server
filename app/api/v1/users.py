@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 import math
 
 from app.config.database import get_db
+from app.api.deps import get_current_user_id
 from app.repositories.user_repo import UserRepository
 from app.schemas.user_schema import (
     UserCreate, 
@@ -21,6 +22,36 @@ router = APIRouter()
 def get_user_repository(db: Session = Depends(get_db)) -> UserRepository:
     """Dependency to get user repository"""
     return UserRepository(db)
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_me(
+    current_user_id: UUID = Depends(get_current_user_id),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Get the authenticated local user resolved from Clerk token"""
+    user = user_repo.get_by_id(current_user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    return user
+
+
+@router.post("/sync", response_model=UserResponse)
+async def sync_me(
+    current_user_id: UUID = Depends(get_current_user_id),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Idempotently resolve/sync authenticated local user from Clerk token"""
+    user = user_repo.get_by_id(current_user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    return user
 
 
 @router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -68,18 +99,24 @@ async def get_user(
 @router.get("/email/{email}", response_model=UserResponse)
 async def get_user_by_email(
     email: str,
-    db: Session = Depends(get_db),
+    current_user_id: UUID = Depends(get_current_user_id),
     user_repo: UserRepository = Depends(get_user_repository)
 ):
-    """Get user by email"""
+    """Get user by email for authenticated self only"""
     
-    user = user_repo.get_by_email(email)
+    user = user_repo.get_by_id(current_user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
+    if user.email.lower() != email.lower():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied for requested email"
+        )
+
     return user
 
 
