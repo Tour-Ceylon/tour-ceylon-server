@@ -1,41 +1,43 @@
 from uuid import UUID
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.models.listing import Listing
+from app.repositories.listing_repo import ListingRepository
+from app.schemas.listing_schema import ListingCreate, ListingUpdate
 
 
 class AdminDashboardListingRepository:
     def __init__(self, db: Session):
         self.db = db
+        self.listing_repo = ListingRepository(db)
 
     def create_listing(self, listing_data: dict) -> Listing:
-        listing = Listing(**listing_data)
-        self.db.add(listing)
-        self.db.commit()
-        self.db.refresh(listing)
-        return listing
+        return self.listing_repo.create(ListingCreate.model_validate(listing_data))
 
     def get_listing(self, listing_id: UUID) -> Listing | None:
-        return self.db.query(Listing).filter(Listing.id == listing_id).first()
+        return self.listing_repo.get_by_id(listing_id)
 
     def get_all_listings(self) -> list[Listing]:
-        return self.db.query(Listing).order_by(Listing.created_at.desc()).all()
+        return (
+            self.db.query(Listing)
+            .options(
+                joinedload(Listing.destination),
+                joinedload(Listing.media),
+                joinedload(Listing.hotel_detail),
+                joinedload(Listing.tour_detail),
+                joinedload(Listing.safari_detail),
+                joinedload(Listing.transfer_detail),
+            )
+            .order_by(Listing.created_at.desc())
+            .all()
+        )
 
-    def update_listing(self, listing: Listing, updates: dict) -> Listing:
-        for field, value in updates.items():
-            setattr(listing, field, value)
-        self.db.commit()
-        self.db.refresh(listing)
-        return listing
+    def update_listing(self, listing_id: UUID, updates: dict) -> Listing | None:
+        return self.listing_repo.update(listing_id, ListingUpdate.model_validate(updates))
 
     def delete_listing(self, listing_id: UUID) -> bool:
-        listing = self.get_listing(listing_id)
-        if not listing:
-            return False
-        self.db.delete(listing)
-        self.db.commit()
-        return True
+        return self.listing_repo.delete(listing_id)
 
     def delete_all(self) -> None:
         self.db.query(Listing).delete()

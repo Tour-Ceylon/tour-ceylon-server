@@ -3,12 +3,9 @@ from fastapi import APIRouter
 from app.api.v1 import (
     admin,
     packages,
-    users, 
-    listing, 
-    bookings, 
-    guest_reviews, 
-    review_metrics, 
-    rooms,
+    users,
+    listing,
+    bookings,
     wishlist,
 )
 
@@ -43,24 +40,6 @@ api_router.include_router(
     bookings.router,
     prefix="/bookings",
     tags=["bookings"]
-)
-
-api_router.include_router(
-    guest_reviews.router,
-    prefix="/guest-reviews",
-    tags=["guest-reviews"]
-)
-
-api_router.include_router(
-    review_metrics.router,
-    prefix="/review-metrics",
-    tags=["review-metrics"]
-)
-
-api_router.include_router(
-    rooms.router,
-    prefix="/rooms",
-    tags=["rooms"]
 )
 
 api_router.include_router(

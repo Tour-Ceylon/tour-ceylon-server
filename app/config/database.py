@@ -1,7 +1,10 @@
 import os
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+
 from dotenv import load_dotenv
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.models.base import Base
 
 # Load environment variables
 load_dotenv()
@@ -12,15 +15,23 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable is not set")
 
-# Create engine with Supabase configuration
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True,
-    pool_recycle=3600,  # Recycle connections every hour
-    pool_size=10,       # Connection pool size
-    max_overflow=20,    # Additional connections beyond pool_size
-    echo=False          # Set to True for SQL query logging
-)
+engine_kwargs = {
+    "pool_pre_ping": True,
+    "echo": False,
+}
+
+if DATABASE_URL.startswith("sqlite"):
+    engine_kwargs["connect_args"] = {"check_same_thread": False}
+else:
+    engine_kwargs.update(
+        {
+            "pool_recycle": 3600,
+            "pool_size": 10,
+            "max_overflow": 20,
+        }
+    )
+
+engine = create_engine(DATABASE_URL, **engine_kwargs)
 
 # Create session
 SessionLocal = sessionmaker(
@@ -28,10 +39,6 @@ SessionLocal = sessionmaker(
     autoflush=False,
     bind=engine
 )
-
-# Base class for models
-Base = declarative_base()
-
 
 # Dependency for FastAPI routes
 def get_db():

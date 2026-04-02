@@ -7,13 +7,13 @@ import math
 from app.config.database import get_db
 from app.repositories.listing_repo import ListingRepository
 from app.schemas.listing_schema import (
-    ListingCreate, 
-    ListingUpdate, 
-    ListingResponse, 
-    ListingListResponse, 
-    ListingSearchParams
+    ListingCreate,
+    ListingUpdate,
+    ListingResponse,
+    ListingListResponse,
+    ListingSearchParams,
 )
-from app.models.enum import ListingType, CurrencyType
+from app.models.enum import CurrencyCode, ListingType
 
 router = APIRouter()
 
@@ -47,54 +47,23 @@ async def create_listing(
         )
 
 
-@router.get("/{listing_id}", response_model=ListingResponse)
-async def get_listing(
-    listing_id: UUID,
-    db: Session = Depends(get_db),
-    listing_repo: ListingRepository = Depends(get_listing_repository)
-):
-    """Get listing by ID"""
-    
-    listing = listing_repo.get_by_id(listing_id)
-    if not listing:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Listing not found"
-        )
-    
-    return listing
-
-
-@router.get("/slug/{slug}", response_model=ListingResponse)
-async def get_listing_by_slug(
-    slug: str,
-    db: Session = Depends(get_db),
-    listing_repo: ListingRepository = Depends(get_listing_repository)
-):
-    """Get listing by slug"""
-    
-    listing = listing_repo.get_by_slug(slug)
-    if not listing:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Listing not found"
-        )
-    
-    return listing
-
-
 @router.get("/", response_model=ListingListResponse)
 async def get_listings(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
-    is_active: bool = Query(None),
+    is_active: bool | None = Query(None),
     db: Session = Depends(get_db),
     listing_repo: ListingRepository = Depends(get_listing_repository)
 ):
     """Get all listings with pagination"""
     
     listings = listing_repo.get_all(skip=skip, limit=limit, is_active=is_active)
-    total = listing_repo.count_active() if is_active else len(listings)
+    if is_active is None:
+        total = listing_repo.count_active() + listing_repo.count_inactive()
+    elif is_active:
+        total = listing_repo.count_active()
+    else:
+        total = listing_repo.count_inactive()
     
     return ListingListResponse(
         listings=listings,
@@ -182,7 +151,7 @@ async def archive_listing(
 ):
     """Archive listing (soft delete)"""
     
-    listing = listing_repo.soft_delete(listing_id)
+    listing = listing_repo.deactivate(listing_id)
     if not listing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -250,6 +219,7 @@ async def get_active_listings(
     listings = listing_repo.get_active()
     return listings
 
+
 @router.get("/inactive", response_model=List[ListingResponse])
 async def get_inactive_listings(
     db: Session = Depends(get_db),
@@ -287,7 +257,7 @@ async def get_listings_by_district(
 
 @router.get("/currency/{currency}", response_model=List[ListingResponse])
 async def get_listings_by_currency(
-    currency: CurrencyType,
+    currency: CurrencyCode,
     db: Session = Depends(get_db),
     listing_repo: ListingRepository = Depends(get_listing_repository)
 ):
@@ -331,3 +301,39 @@ async def get_listing_stats(
         "inactive_listings": inactive_count,
         "total_listings": active_count + inactive_count
     }
+
+
+@router.get("/slug/{slug}", response_model=ListingResponse)
+async def get_listing_by_slug(
+    slug: str,
+    db: Session = Depends(get_db),
+    listing_repo: ListingRepository = Depends(get_listing_repository)
+):
+    """Get listing by slug"""
+
+    listing = listing_repo.get_by_slug(slug)
+    if not listing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Listing not found"
+        )
+
+    return listing
+
+
+@router.get("/{listing_id}", response_model=ListingResponse)
+async def get_listing(
+    listing_id: UUID,
+    db: Session = Depends(get_db),
+    listing_repo: ListingRepository = Depends(get_listing_repository)
+):
+    """Get listing by ID"""
+
+    listing = listing_repo.get_by_id(listing_id)
+    if not listing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Listing not found"
+        )
+
+    return listing

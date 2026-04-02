@@ -1,24 +1,38 @@
-from datetime import datetime, timezone
-import uuid 
-from sqlalchemy import Column, Enum, DateTime, ForeignKey, Integer
-from app.config.database import Base
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, String, ForeignKey, UUID, Numeric, DateTime, Enum
+from sqlalchemy.orm import relationship
 
-from app.models.enum import BookingStatus
+from app.models.base import Base, UUIDMixin, TimestampMixin
+from app.models.enum import CurrencyCode, PaymentTransactionStatus, BookingStatus
 
 
-class Bookings(Base):
-    __tablename__ = "Bookings"
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("Users.id"), nullable=False)
-    listing_id = Column(UUID(as_uuid=True), ForeignKey("Listings.id"), nullable=False)
-    travel_date = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    travel_count = Column(Integer, default=1, nullable=False)
-    unit_price_minor = Column(Integer, nullable=False)
-    total_price_minor = Column(Integer, nullable=False)
-    status = Column(
-        Enum(BookingStatus),
-        default=BookingStatus.PENDING_PAYMENT,
-        nullable=False
+class Booking(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "bookings"
+
+    booking_reference = Column(String, nullable=False, unique=True, index=True)
+
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True
     )
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    status = Column(Enum(BookingStatus, name="booking_status_enum"), nullable=False)
+
+    total_amount = Column(Numeric(10, 2), nullable=False)
+
+    currency = Column(Enum(CurrencyCode, name="currency_code_enum"), nullable=False, default=CurrencyCode.USD)
+
+    payment_status = Column(Enum(PaymentTransactionStatus, name="payment_transaction_enum"), nullable=False)
+
+    booked_at = Column(DateTime, nullable=False)
+
+    # Relationships
+    user = relationship("User", back_populates="bookings")
+    booking_items = relationship("BookingItem", back_populates="booking", cascade="all, delete-orphan")
+    payments = relationship("PaymentTransaction", back_populates="booking", cascade="all, delete-orphan")
+    status_history = relationship("BookingStatusHistory", back_populates="booking", cascade="all, delete-orphan")
+    reviews = relationship("Review", back_populates="booking")
+
+
+Bookings = Booking

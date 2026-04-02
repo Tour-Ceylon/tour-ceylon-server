@@ -7,7 +7,7 @@ from app.api.errors import AdminAPIError, admin_api_error_handler
 
 from app.config.database import engine
 import app.models
-from app.models.user import Base
+from app.models.base import Base
 
 # Create tables on startup
 Base.metadata.create_all(bind=engine)

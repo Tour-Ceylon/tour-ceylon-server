@@ -1,56 +1,69 @@
-from datetime import datetime, timezone
-import uuid
+from sqlalchemy import Column, Enum, Float, ForeignKey, String, Text, UUID
+from sqlalchemy.orm import relationship
 
-from sqlalchemy import Boolean, Column, DateTime, Enum, Float, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSON, UUID
-
-from app.config.database import Base
-from app.models.enum import CurrencyType, ListingType
+from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
+from app.models.enum import ListingType, ListingStatus, CurrencyCode
 
 
-class Listing(Base):
-    __tablename__ = "Listings"
+class Listing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
+    __tablename__ = "listings"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    type = Column(Enum(ListingType), nullable=False, index=True)
+    destination_id = Column(UUID(as_uuid=True), ForeignKey("destinations.id"), nullable=False, index=True)
+
+    listing_type = Column(Enum(ListingType, name="listing_type_enum"), nullable=False, index=True)
     title = Column(String, nullable=False)
     slug = Column(String, unique=True, index=True, nullable=True)
     description = Column(Text, nullable=True)
-
-    location = Column(String, nullable=True)
-    location_city = Column(String, nullable=True, index=True)
-    location_district = Column(String, nullable=True, index=True)
     latitude = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)
+    status = Column(
+        Enum(ListingStatus, name="listing_status_enum"),
+        default=ListingStatus.DRAFT,
+        nullable=False
+    )
+    base_currency = Column(
+        Enum(CurrencyCode, name="currency_code_enum"),
+        default=CurrencyCode.USD,
+        nullable=False
+    )
 
-    image = Column(String, nullable=True)
-    rating = Column(Float, nullable=True)
-    review_count = Column(Integer, nullable=True)
-    group_size = Column(Integer, nullable=True)
-    cancellation_policy = Column(Text, nullable=True)
-    includes = Column(JSON, nullable=True, default=list)
-    excludes = Column(JSON, nullable=True, default=list)
-    recommendation = Column(Text, nullable=True)
-    is_active = Column(Boolean, default=True, nullable=False, index=True)
-    base_currency = Column(Enum(CurrencyType), default=CurrencyType.LKR, nullable=False)
-
-    duration = Column(String, nullable=True)
-    route = Column(String, nullable=True)
-    price = Column(Float, nullable=True)
-    highlights = Column(JSON, nullable=True)
-
-    activity_type = Column(String, nullable=True)
-    difficulty = Column(String, nullable=True)
-
-    origin = Column(String, nullable=True)
-    destination = Column(String, nullable=True)
-    vehicle_type = Column(String, nullable=True)
-    service_highlights = Column(JSON, nullable=True)
-
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
-    updated_at = Column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-        nullable=False,
+    destination = relationship("Destination", back_populates="listings")
+    media = relationship(
+        "ListingMedia",
+        back_populates="listing",
+        cascade="all, delete-orphan",
+        order_by="ListingMedia.sort_order",
+    )
+    variants = relationship("ListingVariant", back_populates="listing", cascade="all, delete-orphan")
+    reviews = relationship("Review", back_populates="listing")
+    wishlisted_by = relationship("Wishlist", back_populates="listing", cascade="all, delete-orphan")
+    booking_items = relationship("BookingItem", back_populates="listing")
+    cancellation_policies = relationship(
+        "CancellationPolicy",
+        back_populates="listing",
+        cascade="all, delete-orphan",
+    )
+    hotel_detail = relationship(
+        "HotelDetail",
+        back_populates="listing",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    safari_detail = relationship(
+        "SafariDetail",
+        back_populates="listing",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    tour_detail = relationship(
+        "TourDetail",
+        back_populates="listing",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    transfer_detail = relationship(
+        "TransferDetail",
+        back_populates="listing",
+        uselist=False,
+        cascade="all, delete-orphan",
     )

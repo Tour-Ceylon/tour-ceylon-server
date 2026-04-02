@@ -7,13 +7,13 @@ import math
 from app.config.database import get_db
 from app.repositories.booking_repo import BookingRepository
 from app.schemas.booking_schema import (
-    BookingCreate, 
-    BookingUpdate, 
-    BookingResponse, 
-    BookingListResponse, 
+    BookingCreate,
+    BookingUpdate,
+    BookingResponse,
+    BookingListResponse,
     BookingSearchParams,
     BookingStatusUpdate,
-    BookingSummary
+    BookingSummary,
 )
 from app.models.enum import BookingStatus
 
@@ -32,8 +32,12 @@ async def create_booking(
 ):
     """Create a new booking"""
     
-    # Check if booking already exists for the same user, listing and travel date
-    if booking_repo.exists_booking(booking_data.user_id, booking_data.listing_id, booking_data.travel_date):
+    first_booking_item = booking_data.booking_items[0]
+    if booking_repo.exists_booking(
+        booking_data.user_id,
+        first_booking_item.listing_id,
+        first_booking_item.travel_date,
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Booking already exists for this user, listing and travel date"
@@ -95,14 +99,15 @@ async def get_bookings_by_listing(
 async def get_bookings(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
-    status: BookingStatus = Query(None),
+    status: BookingStatus | None = Query(None),
     db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
     """Get all bookings with pagination"""
     
     bookings = booking_repo.get_all(skip=skip, limit=limit, status=status)
-    total = len(bookings)  # This is approximate, could be improved with a dedicated count method
+    status_counts = booking_repo.count_by_status()
+    total = status_counts.get(status, 0) if status else sum(status_counts.values())
     
     return BookingListResponse(
         bookings=bookings,
@@ -298,17 +303,17 @@ async def get_booking_stats(
     
     return BookingSummary(
         total_bookings=sum(status_counts.values()),
-        pending_payment=status_counts.get(BookingStatus.PENDING_PAYMENT, 0),
+        pending=status_counts.get(BookingStatus.PENDING, 0),
         confirmed=status_counts.get(BookingStatus.CONFIRMED, 0),
         cancelled=status_counts.get(BookingStatus.CANCELLED, 0),
         completed=status_counts.get(BookingStatus.COMPLETED, 0),
-        total_revenue_minor=total_revenue
+        total_revenue=total_revenue
     )
 
 
 @router.get("/stats/revenue")
 async def get_revenue_stats(
-    status: BookingStatus = Query(None),
+    status: BookingStatus | None = Query(None),
     db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
@@ -319,10 +324,10 @@ async def get_revenue_stats(
     completed_revenue = booking_repo.get_total_revenue(BookingStatus.COMPLETED)
     
     return {
-        "total_revenue_minor": total_revenue,
-        "confirmed_revenue_minor": confirmed_revenue,
-        "completed_revenue_minor": completed_revenue,
-        "realized_revenue_minor": confirmed_revenue + completed_revenue
+        "total_revenue": total_revenue,
+        "confirmed_revenue": confirmed_revenue,
+        "completed_revenue": completed_revenue,
+        "realized_revenue": confirmed_revenue + completed_revenue
     }
 
 
@@ -342,9 +347,9 @@ async def get_user_booking_stats(
     return {
         "user_id": user_id,
         "total_bookings": total_bookings,
-        "total_spent_minor": total_spent,
-        "confirmed_spent_minor": confirmed_spent,
-        "completed_spent_minor": completed_spent
+        "total_spent": total_spent,
+        "confirmed_spent": confirmed_spent,
+        "completed_spent": completed_spent
     }
 
 
@@ -364,7 +369,7 @@ async def get_listing_booking_stats(
     return {
         "listing_id": listing_id,
         "total_bookings": total_bookings,
-        "total_revenue_minor": total_revenue,
-        "confirmed_revenue_minor": confirmed_revenue,
-        "completed_revenue_minor": completed_revenue
+        "total_revenue": total_revenue,
+        "confirmed_revenue": confirmed_revenue,
+        "completed_revenue": completed_revenue
     }

@@ -160,3 +160,10 @@ frontend_endpoint.md
 
 
 app/tests/*
+
+
+FRONTEND_AGENT_PROMPT.md
+FRONTEND_API_MIGRATION_GUIDE.md
+frontend-contract-examples.json
+openapi.json
+scripts/

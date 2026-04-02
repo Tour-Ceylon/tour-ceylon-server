@@ -1,51 +1,91 @@
-from datetime import datetime
-from typing import Optional
+from datetime import date, datetime
+from decimal import Decimal
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict
 
-from app.models.enum import BookingStatus
+from pydantic import BaseModel, ConfigDict, Field
 
-
-class BookingBase(BaseModel):
-    """Base booking schema with common fields"""
-    user_id: UUID
-    listing_id: UUID
-    travel_date: datetime
-    travel_count: int = 1
-    unit_price_minor: int
-    total_price_minor: int
-    status: BookingStatus = BookingStatus.PENDING_PAYMENT
+from app.models.enum import BookingStatus, CurrencyCode, PaymentTransactionStatus
 
 
-class BookingCreate(BookingBase):
-    """Schema for creating a new booking"""
+class BookingTravelerBase(BaseModel):
+    first_name: str
+    last_name: str
+    age: int
+    nationality: str | None = None
+    passport_no: str | None = None
+    special_notes: str | None = None
+
+
+class BookingTravelerCreate(BookingTravelerBase):
     pass
 
 
+class BookingTravelerResponse(BookingTravelerBase):
+    id: UUID
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BookingItemBase(BaseModel):
+    listing_id: UUID
+    variant_id: UUID
+    travel_date: date
+    quantity: int = Field(ge=1)
+    unit_price: float
+    total_price: float
+    travelers: list[BookingTravelerCreate] = []
+
+
+class BookingItemCreate(BookingItemBase):
+    pass
+
+
+class BookingItemResponse(BookingItemBase):
+    id: UUID
+    travelers: list[BookingTravelerResponse] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BookingBase(BaseModel):
+    booking_reference: str
+    user_id: UUID
+    status: BookingStatus = BookingStatus.PENDING
+    total_amount: Decimal
+    currency: CurrencyCode = CurrencyCode.USD
+    payment_status: PaymentTransactionStatus = PaymentTransactionStatus.PENDING
+    booked_at: datetime
+
+
+class BookingCreate(BookingBase):
+    booking_items: list[BookingItemCreate] = Field(min_length=1)
+
+
 class BookingUpdate(BaseModel):
-    """Schema for updating booking information"""
-    travel_date: Optional[datetime] = None
-    travel_count: Optional[int] = None
-    unit_price_minor: Optional[int] = None
-    total_price_minor: Optional[int] = None
-    status: Optional[BookingStatus] = None
+    booking_reference: str | None = None
+    user_id: UUID | None = None
+    status: BookingStatus | None = None
+    total_amount: Decimal | None = None
+    currency: CurrencyCode | None = None
+    payment_status: PaymentTransactionStatus | None = None
+    booked_at: datetime | None = None
+    booking_items: list[BookingItemCreate] | None = None
 
 
 class BookingResponse(BookingBase):
-    """Schema for booking API responses"""
     id: UUID
+    booking_items: list[BookingItemResponse]
     created_at: datetime
-    
+    updated_at: datetime
+
     model_config = ConfigDict(from_attributes=True)
 
 
 class BookingInDB(BookingResponse):
-    """Schema for booking stored in database (includes all fields)"""
     pass
 
 
 class BookingListResponse(BaseModel):
-    """Schema for paginated booking list responses"""
     bookings: list[BookingResponse]
     total: int
     page: int
@@ -54,28 +94,28 @@ class BookingListResponse(BaseModel):
 
 
 class BookingSearchParams(BaseModel):
-    """Schema for booking search parameters"""
-    user_id: Optional[UUID] = None
-    listing_id: Optional[UUID] = None
-    status: Optional[BookingStatus] = None
-    travel_date_from: Optional[datetime] = None
-    travel_date_to: Optional[datetime] = None
-    min_price: Optional[int] = None
-    max_price: Optional[int] = None
+    user_id: UUID | None = None
+    listing_id: UUID | None = None
+    variant_id: UUID | None = None
+    status: BookingStatus | None = None
+    booked_at_from: datetime | None = None
+    booked_at_to: datetime | None = None
+    travel_date_from: date | None = None
+    travel_date_to: date | None = None
+    min_total_amount: Decimal | None = None
+    max_total_amount: Decimal | None = None
     page: int = 1
     per_page: int = 20
 
 
 class BookingStatusUpdate(BaseModel):
-    """Schema for updating booking status"""
     status: BookingStatus
 
 
 class BookingSummary(BaseModel):
-    """Schema for booking summary statistics"""
     total_bookings: int
-    pending_payment: int
+    pending: int
     confirmed: int
     cancelled: int
     completed: int
-    total_revenue_minor: int
+    total_revenue: Decimal

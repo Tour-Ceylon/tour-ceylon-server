@@ -1,10 +1,13 @@
-from uuid import UUID, uuid4
+from datetime import time
+from uuid import UUID
 
 from fastapi import status
 from sqlalchemy.orm import Session
 
 from app.api.errors import AdminAPIError
-from app.models.enum import CurrencyType, ListingType
+from app.models.destination import Destination
+from app.models.enum import CurrencyCode, ListingType
+from app.models.listing import Listing
 from app.repositories.admin.addon_repo import AdminAddonRepository
 from app.repositories.admin.listing_repo import AdminDashboardListingRepository
 from app.repositories.admin.package_repo import AdminPackageRepository
@@ -15,11 +18,12 @@ from app.services.package_service import build_package_response
 class AdminDashboardService:
     VALID_LISTING_CATEGORIES = {"stay", "tour", "activity", "transfer"}
     LISTING_TYPE_MAP = {
-        "stay": ListingType.STAY,
+        "stay": ListingType.HOTEL,
         "tour": ListingType.TOUR,
-        "activity": ListingType.ACTIVITY,
+        "activity": ListingType.SAFARI,
         "transfer": ListingType.TRANSFER,
     }
+    CATEGORY_BY_LISTING_TYPE = {value: key for key, value in LISTING_TYPE_MAP.items()}
 
     def __init__(self, db: Session):
         self.db = db
@@ -31,7 +35,7 @@ class AdminDashboardService:
     def get_snapshot(self) -> dict:
         listing_groups = {"stay": [], "tour": [], "activity": [], "transfer": []}
         for listing in self.listings.get_all_listings():
-            category = listing.type.value
+            category = self.CATEGORY_BY_LISTING_TYPE.get(listing.listing_type)
             if category in listing_groups:
                 listing_groups[category].append(self._build_listing_response(listing))
 
@@ -91,21 +95,21 @@ class AdminDashboardService:
     def update_listing(self, category: str, listing_id: UUID, payload: dict) -> dict:
         category = self._validate_category(category)
         listing = self.listings.get_listing(listing_id)
-        if listing is None or listing.type.value != self.LISTING_TYPE_MAP[category].value:
+        if listing is None or listing.listing_type != self.LISTING_TYPE_MAP[category]:
             raise self._not_found("Listing not found")
 
         listing_updates = self._listing_model_data(category, payload, partial=True)
-        if listing_updates:
-            self.listings.update_listing(listing, listing_updates)
-
-        return self._build_listing_response(listing)
+        updated = self.listings.update_listing(listing_id, listing_updates)
+        if updated is None:
+            raise self._not_found("Listing not found")
+        return self._build_listing_response(updated)
 
     def delete_listing(self, category: str, listing_id: UUID) -> None:
         category = self._validate_category(category)
         listing = self.listings.get_listing(listing_id)
-        if listing is None or listing.type.value != self.LISTING_TYPE_MAP[category].value:
+        if listing is None or listing.listing_type != self.LISTING_TYPE_MAP[category]:
             raise self._not_found("Listing not found")
-        
+
         self.listings.delete_listing(listing_id)
 
     def get_settings(self) -> dict:
@@ -137,6 +141,13 @@ class AdminDashboardService:
         self.packages.delete_all()
         self.addons.delete_all()
         return self.get_snapshot()
+
+    def _validate_destination_id(self, destination_id: UUID) -> None:
+        if self.db.get(Destination, destination_id) is None:
+            raise AdminAPIError(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                message="Destination not found",
+            )
 
     def _validate_addon_ids(self, addon_ids: list[str]) -> None:
         missing_ids = []
@@ -201,48 +212,78 @@ class AdminDashboardService:
         return aliases.get(normalized, normalized)
 
     def _listing_model_data(self, category: str, payload: dict, partial: bool = False) -> dict:
-        location = payload.get("location")
-        city, district = self._split_location(location) if location else (None, None)
-        is_active = None
-        if "isActive" in payload or not partial:
-            is_active = payload.get("isActive", True)
+        destination_id = payload.get("destination_id")
+        if destination_id is not None:
+            self._validate_destination_id(destination_id)
+        elif not partial:
+            raise AdminAPIError(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                message="destination_id is required",
+            )
 
         model_data = {
-            "type": self.LISTING_TYPE_MAP[category],
+            "listing_type": self.LISTING_TYPE_MAP[category],
+            "destination_id": destination_id,
             "title": payload.get("title"),
-            "slug": self._slugify(payload.get("title")) if payload.get("title") else None,
+            "slug": payload.get("slug"),
             "description": payload.get("description"),
-            "location": location,
-            "location_city": city,
-            "location_district": district,
-            "image": payload.get("image"),
-            "rating": payload.get("rating"),
-            "review_count": payload.get("reviewCount"),
-            "cancellation_policy": payload.get("cancellationPolicy"),
-            "includes": payload.get("includes"),
-            "recommendation": payload.get("recommendation"),
-            "is_active": is_active,
-            "base_currency": CurrencyType.LKR,
-            # Tour / Activity fields
-            "duration": payload.get("duration"),
-            "route": payload.get("route"),
-            "price": payload.get("price"),
-            "highlights": payload.get("highlights"),
-            # Activity-only
-            "activity_type": payload.get("activityType"),
-            "difficulty": payload.get("difficulty"),
-            # Transfer-only
-            "origin": payload.get("origin"),
-            "destination": payload.get("destination"),
-            "vehicle_type": payload.get("vehicleType"),
-            "service_highlights": payload.get("serviceHighlights"),
+            "latitude": payload.get("latitude"),
+            "longitude": payload.get("longitude"),
+            "is_active": payload.get("is_active"),
+            "base_currency": payload.get("base_currency", CurrencyCode.LKR),
+            "media": self._normalize_media_payload(payload.get("media")) if "media" in payload else ([] if not partial else None),
         }
+
+        detail_key = self._detail_key_for_category(category)
+        if detail_key in payload and payload[detail_key] is not None:
+            model_data[detail_key] = self._normalize_detail_payload(detail_key, payload[detail_key])
+
         if partial:
             return {key: value for key, value in model_data.items() if value is not None}
         return model_data
 
-    def _listing_payload(self, category: str, payload: dict) -> dict:
-        pass  # No longer needed, removed calls above
+    def _normalize_detail_payload(self, detail_key: str, detail_payload: dict) -> dict:
+        normalized = dict(detail_payload)
+        if detail_key == "hotel_detail":
+            normalized["check_in_time"] = self._parse_time(normalized["check_in_time"])
+            normalized["check_out_time"] = self._parse_time(normalized["check_out_time"])
+        return normalized
+
+    def _normalize_media_payload(self, media_payload: list[dict] | None) -> list[dict] | None:
+        if media_payload is None:
+            return None
+
+        normalized_media = []
+        for media in media_payload:
+            normalized_media.append(
+                {
+                    "url": media["url"],
+                    "alt_text": media.get("alt_text", media.get("altText")),
+                    "sort_order": media.get("sort_order", media.get("sortOrder")),
+                    "is_cover": media.get("is_cover", media.get("isCover", False)),
+                    "media_type": media.get("media_type", media.get("mediaType")),
+                }
+            )
+        return normalized_media
+
+    def _parse_time(self, raw_value: str | time) -> time:
+        if isinstance(raw_value, time):
+            return raw_value
+        try:
+            return time.fromisoformat(raw_value)
+        except ValueError as exc:
+            raise AdminAPIError(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                message=f"Invalid time value: {raw_value}",
+            ) from exc
+
+    def _detail_key_for_category(self, category: str) -> str:
+        return {
+            "stay": "hotel_detail",
+            "tour": "tour_detail",
+            "activity": "safari_detail",
+            "transfer": "transfer_detail",
+        }[category]
 
     def _build_package_response(self, package) -> dict:
         return build_package_response(package)
@@ -259,73 +300,86 @@ class AdminDashboardService:
             "category": category,
         }
 
-    def _build_listing_response(self, listing) -> dict:
-        location_parts = [part for part in [listing.location_city, listing.location_district] if part]
-        location_str = ", ".join(location_parts) if location_parts else listing.location
-
+    def _build_listing_response(self, listing: Listing) -> dict:
         payload = {
             "id": listing.id,
-            "category": listing.type.value,
+            "category": self.CATEGORY_BY_LISTING_TYPE.get(listing.listing_type, listing.listing_type.value),
+            "destination_id": listing.destination_id,
             "title": listing.title,
             "description": listing.description,
-            "image": listing.image,
-            "rating": listing.rating,
-            "reviewCount": listing.review_count or 0.0,
-            "cancellationPolicy": listing.cancellation_policy,
-            "includes": listing.includes or [],
-            "recommendation": listing.recommendation,
-            "isActive": listing.is_active,
-            "location": location_str,
-            "duration": listing.duration,
-            "route": listing.route,
-            "price": listing.price,
-            "highlights": listing.highlights,
-            "activityType": listing.activity_type,
-            "difficulty": listing.difficulty,
-            "origin": listing.origin,
-            "destination": listing.destination,
-            "vehicleType": listing.vehicle_type,
-            "serviceHighlights": listing.service_highlights,
-            "rooms": [
+            "is_active": listing.is_active,
+            "latitude": listing.latitude,
+            "longitude": listing.longitude,
+            "media": [
                 {
-                    "id": str(r.id),
-                    "name": r.name,
-                    "amenities": r.amenities or [],
-                    "pricePerNight": r.price_per_night,
-                    "available": r.is_available,
+                    "id": media.id,
+                    "url": media.url,
+                    "alt_text": media.alt_text,
+                    "sort_order": media.sort_order,
+                    "is_cover": media.is_cover,
+                    "media_type": media.media_type,
                 }
-                for r in getattr(listing, "rooms", [])
-            ] if listing.type.value == "stay" else None,
-            "reviewMetrics": [
-                {
-                    "label": m.label,
-                    "score": m.score,
-                }
-                for m in getattr(listing, "review_metrics", [])
-            ] if listing.type.value == "stay" else None,
-            "guestReviews": [
-                {
-                    "id": str(g.id),
-                    "author": g.author,
-                    "quote": g.quote,
-                }
-                for g in getattr(listing, "guest_reviews", [])
-            ] if listing.type.value == "stay" else None,
+                for media in listing.media
+            ],
+            "destination": {
+                "id": listing.destination.id,
+                "name": listing.destination.name,
+                "destination_type": listing.destination.destination_type,
+                "latitude": listing.destination.latitude,
+                "longitude": listing.destination.longitude,
+            }
+            if listing.destination
+            else None,
+            "hotel_detail": self._build_hotel_detail(listing),
+            "tour_detail": self._build_tour_detail(listing),
+            "safari_detail": self._build_safari_detail(listing),
+            "transfer_detail": self._build_transfer_detail(listing),
         }
-        return {k: v for k, v in payload.items() if v is not None}
+        return {key: value for key, value in payload.items() if value is not None}
 
-    def _split_location(self, location: str | None) -> tuple[str | None, str | None]:
-        if not location:
-            return None, None
-        parts = [part.strip() for part in location.split(",", 1)]
-        if len(parts) == 1:
-            return parts[0], None
-        return parts[0], parts[1]
-
-    def _slugify(self, value: str | None) -> str | None:
-        if not value:
+    def _build_hotel_detail(self, listing: Listing) -> dict | None:
+        detail = listing.hotel_detail
+        if detail is None:
             return None
-        return f"{'-'.join(value.lower().split())}-{str(uuid4())[:8]}"
+        return {
+            "property_type": detail.property_type,
+            "star_rating": detail.star_rating,
+            "check_in_time": detail.check_in_time.isoformat(),
+            "check_out_time": detail.check_out_time.isoformat(),
+            "child_policy": detail.child_policy,
+        }
+
+    def _build_tour_detail(self, listing: Listing) -> dict | None:
+        detail = listing.tour_detail
+        if detail is None:
+            return None
+        return {
+            "duration_days": detail.duration_days,
+            "route_summary": detail.route_summary,
+            "meeting_point": detail.meeting_point,
+        }
+
+    def _build_safari_detail(self, listing: Listing) -> dict | None:
+        detail = listing.safari_detail
+        if detail is None:
+            return None
+        return {
+            "national_park": detail.national_park,
+            "safari_type": detail.safari_type,
+            "duration_minutes": detail.duration_minutes,
+            "guide_included": detail.guide_included,
+            "pickup_supported": detail.pickup_supported,
+        }
+
+    def _build_transfer_detail(self, listing: Listing) -> dict | None:
+        detail = listing.transfer_detail
+        if detail is None:
+            return None
+        return {
+            "origin_type": detail.origin_type,
+            "destination_type": detail.destination_type,
+            "vehicle_policy": detail.vehicle_policy,
+        }
 
     def _not_found(self, message: str) -> AdminAPIError:
         return AdminAPIError(status_code=status.HTTP_404_NOT_FOUND, message=message)
