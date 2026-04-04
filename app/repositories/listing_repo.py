@@ -16,6 +16,8 @@ class ListingRepository:
     
     def create(self, listing_data: ListingCreate) -> Listing:
         """Create a new listing"""
+        requested_status = getattr(listing_data, "status", None)
+        is_active = requested_status == ListingStatus.PUBLISHED if requested_status else True
         db_listing = Listing(
             type=listing_data.type,
             title=listing_data.title,
@@ -26,7 +28,7 @@ class ListingRepository:
             latitude=listing_data.latitude,
             longitude=listing_data.longitude,
             base_currency=listing_data.base_currency,
-            status=listing_data.status
+            is_active=is_active,
         )
         self.db.add(db_listing)
         self.db.commit()
@@ -51,7 +53,10 @@ class ListingRepository:
         query = self.db.query(Listing)
         
         if status is not None:
-            query = query.filter(Listing.status == status)
+            if status == ListingStatus.PUBLISHED:
+                query = query.filter(Listing.is_active.is_(True))
+            else:
+                query = query.filter(Listing.is_active.is_(False))
             
         return query.offset(skip).limit(limit).all()
     
@@ -78,7 +83,10 @@ class ListingRepository:
             filters.append(Listing.base_currency == search_params.base_currency)
         
         if search_params.status:
-            filters.append(Listing.status == search_params.status)
+            if search_params.status == ListingStatus.PUBLISHED:
+                filters.append(Listing.is_active.is_(True))
+            else:
+                filters.append(Listing.is_active.is_(False))
         
         if filters:
             query = query.filter(and_(*filters))
@@ -123,7 +131,7 @@ class ListingRepository:
         if not db_listing:
             return None
         
-        db_listing.status = ListingStatus.ARCHIVED
+        db_listing.is_active = False
         self.db.commit()
         self.db.refresh(db_listing)
         return db_listing
@@ -134,7 +142,7 @@ class ListingRepository:
         if not db_listing:
             return None
         
-        db_listing.status = ListingStatus.PUBLISHED
+        db_listing.is_active = True
         self.db.commit()
         self.db.refresh(db_listing)
         return db_listing
@@ -145,7 +153,7 @@ class ListingRepository:
         if not db_listing:
             return None
         
-        db_listing.status = ListingStatus.DRAFT
+        db_listing.is_active = False
         self.db.commit()
         self.db.refresh(db_listing)
         return db_listing
@@ -156,7 +164,9 @@ class ListingRepository:
     
     def get_by_status(self, status: ListingStatus) -> List[Listing]:
         """Get all listings by status"""
-        return self.db.query(Listing).filter(Listing.status == status).all()
+        if status == ListingStatus.PUBLISHED:
+            return self.db.query(Listing).filter(Listing.is_active.is_(True)).all()
+        return self.db.query(Listing).filter(Listing.is_active.is_(False)).all()
     
     def get_by_location_city(self, city: str) -> List[Listing]:
         """Get all listings by city"""
@@ -172,15 +182,15 @@ class ListingRepository:
     
     def get_published(self) -> List[Listing]:
         """Get all published listings"""
-        return self.db.query(Listing).filter(Listing.status == ListingStatus.PUBLISHED).all()
+        return self.db.query(Listing).filter(Listing.is_active.is_(True)).all()
     
     def get_drafts(self) -> List[Listing]:
         """Get all draft listings"""
-        return self.db.query(Listing).filter(Listing.status == ListingStatus.DRAFT).all()
+        return self.db.query(Listing).filter(Listing.is_active.is_(False)).all()
     
     def get_archived(self) -> List[Listing]:
         """Get all archived listings"""
-        return self.db.query(Listing).filter(Listing.status == ListingStatus.ARCHIVED).all()
+        return self.db.query(Listing).filter(Listing.is_active.is_(False)).all()
     
     def count_by_type(self) -> dict:
         """Get listing count grouped by type"""
@@ -193,12 +203,11 @@ class ListingRepository:
     
     def count_by_status(self) -> dict:
         """Get listing count grouped by status"""
-        results = (
-            self.db.query(Listing.status, func.count(Listing.id))
-            .group_by(Listing.status)
-            .all()
-        )
-        return {status: count for status, count in results}
+        return {
+            ListingStatus.PUBLISHED: self.count_published_listings(),
+            ListingStatus.DRAFT: self.count_draft_listings(),
+            ListingStatus.ARCHIVED: 0,
+        }
     
     def count_by_currency(self) -> dict:
         """Get listing count grouped by currency"""
@@ -211,15 +220,15 @@ class ListingRepository:
     
     def count_published_listings(self) -> int:
         """Get count of published listings"""
-        return self.db.query(Listing).filter(Listing.status == ListingStatus.PUBLISHED).count()
+        return self.db.query(Listing).filter(Listing.is_active.is_(True)).count()
     
     def count_draft_listings(self) -> int:
         """Get count of draft listings"""
-        return self.db.query(Listing).filter(Listing.status == ListingStatus.DRAFT).count()
+        return self.db.query(Listing).filter(Listing.is_active.is_(False)).count()
     
     def count_archived_listings(self) -> int:
         """Get count of archived listings"""
-        return self.db.query(Listing).filter(Listing.status == ListingStatus.ARCHIVED).count()
+        return 0
     
     def exists_by_slug(self, slug: str, exclude_listing_id: Optional[UUID] = None) -> bool:
         """Check if listing exists by slug, optionally excluding a specific listing ID"""

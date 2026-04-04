@@ -5,7 +5,13 @@ from sqlalchemy.orm import Session
 import math
 
 from app.config.database import get_db
-from app.api.deps import get_current_user_id
+from app.api.deps import (
+    AuthIdentity,
+    get_auth_identity,
+    get_current_user,
+    get_current_user_id,
+    resolve_or_create_local_user,
+)
 from app.repositories.user_repo import UserRepository
 from app.schemas.user_schema import (
     UserCreate, 
@@ -15,6 +21,7 @@ from app.schemas.user_schema import (
     UserSearchParams
 )
 from app.models.enum import UserRole
+from app.models.user import User
 
 router = APIRouter()
 
@@ -26,32 +33,19 @@ def get_user_repository(db: Session = Depends(get_db)) -> UserRepository:
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(
-    current_user_id: UUID = Depends(get_current_user_id),
-    user_repo: UserRepository = Depends(get_user_repository),
+    current_user: User = Depends(get_current_user),
 ):
-    """Get the authenticated local user resolved from Clerk token"""
-    user = user_repo.get_by_id(current_user_id)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
-    return user
+    """Get the authenticated local user resolved from verified bearer token."""
+    return current_user
 
 
 @router.post("/sync", response_model=UserResponse)
 async def sync_me(
-    current_user_id: UUID = Depends(get_current_user_id),
+    auth_identity: AuthIdentity = Depends(get_auth_identity),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
-    """Idempotently resolve/sync authenticated local user from Clerk token"""
-    user = user_repo.get_by_id(current_user_id)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
-    return user
+    """Idempotently resolve/sync authenticated local user from verified token claims."""
+    return resolve_or_create_local_user(auth_identity, user_repo)
 
 
 @router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -78,22 +72,23 @@ async def create_user(
         )
 
 
-@router.get("/{user_id}", response_model=UserResponse)
-async def get_user(
-    user_id: UUID,
+@router.get("/stats/roles")
+async def get_user_role_stats(
     db: Session = Depends(get_db),
     user_repo: UserRepository = Depends(get_user_repository)
 ):
-    """Get user by ID"""
+    """Get user count statistics by role"""
     
-    user = user_repo.get_by_id(user_id)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
+    role_counts = user_repo.count_by_role()
+    active_count = user_repo.count_active_users()
+    inactive_count = user_repo.count_inactive_users()
     
-    return user
+    return {
+        "role_distribution": role_counts,
+        "active_users": active_count,
+        "inactive_users": inactive_count,
+        "total_users": active_count + inactive_count
+    }
 
 
 @router.get("/email/{email}", response_model=UserResponse)
@@ -118,47 +113,6 @@ async def get_user_by_email(
         )
 
     return user
-
-
-@router.get("/", response_model=UserListResponse)
-async def get_users(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
-    is_active: bool = Query(None),
-    db: Session = Depends(get_db),
-    user_repo: UserRepository = Depends(get_user_repository)
-):
-    """Get all users with pagination"""
-    
-    users = user_repo.get_all(skip=skip, limit=limit, is_active=is_active)
-    total = user_repo.count_active_users() if is_active else len(users)
-    
-    return UserListResponse(
-        users=users,
-        total=total,
-        page=skip // limit + 1,
-        per_page=limit,
-        total_pages=math.ceil(total / limit) if total > 0 else 0
-    )
-
-
-@router.post("/search", response_model=UserListResponse)
-async def search_users(
-    search_params: UserSearchParams,
-    db: Session = Depends(get_db),
-    user_repo: UserRepository = Depends(get_user_repository)
-):
-    """Search users with filters"""
-    
-    users, total_count = user_repo.search(search_params)
-    
-    return UserListResponse(
-        users=users,
-        total=total_count,
-        page=search_params.page,
-        per_page=search_params.per_page,
-        total_pages=math.ceil(total_count / search_params.per_page) if total_count > 0 else 0
-    )
 
 
 @router.put("/{user_id}", response_model=UserResponse)
@@ -271,20 +225,60 @@ async def get_users_by_country(
     return users
 
 
-@router.get("/stats/roles")
-async def get_user_role_stats(
+@router.post("/search", response_model=UserListResponse)
+async def search_users(
+    search_params: UserSearchParams,
     db: Session = Depends(get_db),
     user_repo: UserRepository = Depends(get_user_repository)
 ):
-    """Get user count statistics by role"""
+    """Search users with filters"""
     
-    role_counts = user_repo.count_by_role()
-    active_count = user_repo.count_active_users()
-    inactive_count = user_repo.count_inactive_users()
+    users, total_count = user_repo.search(search_params)
     
-    return {
-        "role_distribution": role_counts,
-        "active_users": active_count,
-        "inactive_users": inactive_count,
-        "total_users": active_count + inactive_count
-    }
+    return UserListResponse(
+        users=users,
+        total=total_count,
+        page=search_params.page,
+        per_page=search_params.per_page,
+        total_pages=math.ceil(total_count / search_params.per_page) if total_count > 0 else 0
+    )
+
+
+@router.get("/", response_model=UserListResponse)
+async def get_users(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    is_active: bool = Query(None),
+    db: Session = Depends(get_db),
+    user_repo: UserRepository = Depends(get_user_repository)
+):
+    """Get all users with pagination"""
+    
+    users = user_repo.get_all(skip=skip, limit=limit, is_active=is_active)
+    total = user_repo.count_active_users() if is_active else len(users)
+    
+    return UserListResponse(
+        users=users,
+        total=total,
+        page=skip // limit + 1,
+        per_page=limit,
+        total_pages=math.ceil(total / limit) if total > 0 else 0
+    )
+
+
+@router.get("/{user_id}", response_model=UserResponse)
+async def get_user(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    user_repo: UserRepository = Depends(get_user_repository)
+):
+    """Get user by ID"""
+    
+    user = user_repo.get_by_id(user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    return user

@@ -1,21 +1,37 @@
+import logging
+
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
 from app.api.router import api_router
+from app.config.database import Base, engine
+from app.config.settings import get_settings
 
-from app.config.database import engine
-from app.models.user import Base
+# Import concrete models so SQLAlchemy metadata is complete before create_all.
+from app.models import admin_addon, admin_package, admin_setting, booking, guestReview, listing, reviewMetric, room, user  # noqa: F401
 
-# Create tables on startup - with error handling
-try:
-    Base.metadata.create_all(bind=engine)
-    logging.info("Database tables created successfully")
-except Exception as e:
-    logging.warning(f"Failed to create database tables: {e}")
-    logging.warning("Server will continue running without database functionality")
-
-# Create tables on startup
-Base.metadata.create_all(bind=engine)
-
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Travel Ready Tours")
+
+settings = get_settings()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.on_event("startup")
+def on_startup() -> None:
+    try:
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database tables initialized")
+    except Exception:
+        logger.exception("Failed to initialize database tables during startup")
+        raise
+
 
 app.include_router(api_router, prefix="/api/v1")
