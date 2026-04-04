@@ -9,6 +9,7 @@ from app.models.destination import Destination
 from app.models.enum import CurrencyCode, ListingType
 from app.models.listing import Listing
 from app.repositories.admin.addon_repo import AdminAddonRepository
+from app.repositories.admin.destination_repo import AdminDestinationRepository
 from app.repositories.admin.listing_repo import AdminDashboardListingRepository
 from app.repositories.admin.package_repo import AdminPackageRepository
 from app.repositories.admin.settings_repo import AdminSettingsRepository
@@ -28,6 +29,7 @@ class AdminDashboardService:
     def __init__(self, db: Session):
         self.db = db
         self.addons = AdminAddonRepository(db)
+        self.destinations = AdminDestinationRepository(db)
         self.packages = AdminPackageRepository(db)
         self.settings = AdminSettingsRepository(db)
         self.listings = AdminDashboardListingRepository(db)
@@ -45,6 +47,20 @@ class AdminDashboardService:
             "settings": self.get_settings(),
             "listings": listing_groups,
         }
+
+    def get_destinations(self) -> list[dict]:
+        return [
+            {
+                "id": destination.id,
+                "name": destination.name,
+                "destination_type": destination.destination_type,
+                "latitude": destination.latitude,
+                "longitude": destination.longitude,
+                "city": None,
+                "district": None,
+            }
+            for destination in self.destinations.get_all_active()
+        ]
 
     def create_package(self, payload: dict) -> dict:
         self._validate_addon_ids(payload.get("addOns", []))
@@ -247,6 +263,37 @@ class AdminDashboardService:
         if detail_key == "hotel_detail":
             normalized["check_in_time"] = self._parse_time(normalized["check_in_time"])
             normalized["check_out_time"] = self._parse_time(normalized["check_out_time"])
+            normalized["amenities"] = list(normalized.get("amenities") or [])
+            normalized["languages_spoken"] = list(normalized.get("languages_spoken") or [])
+            normalized["meal_plans"] = list(normalized.get("meal_plans") or [])
+        elif detail_key == "tour_detail":
+            normalized["itinerary_highlights"] = list(normalized.get("itinerary_highlights") or [])
+            normalized["included_items"] = list(normalized.get("included_items") or [])
+            normalized["excluded_items"] = list(normalized.get("excluded_items") or [])
+            normalized["languages"] = list(normalized.get("languages") or [])
+            normalized["what_to_bring"] = list(normalized.get("what_to_bring") or [])
+            if normalized.get("start_time") is not None:
+                normalized["start_time"] = self._parse_time(normalized["start_time"])
+            if normalized.get("end_time") is not None:
+                normalized["end_time"] = self._parse_time(normalized["end_time"])
+        elif detail_key == "safari_detail":
+            normalized["included_items"] = list(normalized.get("included_items") or [])
+            normalized["excluded_items"] = list(normalized.get("excluded_items") or [])
+            normalized["languages"] = list(normalized.get("languages") or [])
+            normalized["what_to_bring"] = list(normalized.get("what_to_bring") or [])
+            normalized["wildlife_highlights"] = list(normalized.get("wildlife_highlights") or [])
+            if normalized.get("start_time") is not None:
+                normalized["start_time"] = self._parse_time(normalized["start_time"])
+            if normalized.get("end_time") is not None:
+                normalized["end_time"] = self._parse_time(normalized["end_time"])
+        elif detail_key == "transfer_detail":
+            normalized["vehicle_types"] = list(normalized.get("vehicle_types") or [])
+            normalized["included_items"] = list(normalized.get("included_items") or [])
+            normalized["excluded_items"] = list(normalized.get("excluded_items") or [])
+            if normalized.get("operating_start_time") is not None:
+                normalized["operating_start_time"] = self._parse_time(normalized["operating_start_time"])
+            if normalized.get("operating_end_time") is not None:
+                normalized["operating_end_time"] = self._parse_time(normalized["operating_end_time"])
         return normalized
 
     def _normalize_media_payload(self, media_payload: list[dict] | None) -> list[dict] | None:
@@ -347,6 +394,30 @@ class AdminDashboardService:
             "check_in_time": detail.check_in_time.isoformat(),
             "check_out_time": detail.check_out_time.isoformat(),
             "child_policy": detail.child_policy,
+            "property_name": detail.property_name,
+            "short_location": detail.short_location,
+            "address_line_1": detail.address_line_1,
+            "address_line_2": detail.address_line_2,
+            "city": detail.city,
+            "district": detail.district,
+            "postal_code": detail.postal_code,
+            "contact_phone": detail.contact_phone,
+            "contact_email": detail.contact_email,
+            "website": detail.website,
+            "google_map_url": detail.google_map_url,
+            "amenities": detail.amenities or [],
+            "languages_spoken": detail.languages_spoken or [],
+            "room_count": detail.room_count,
+            "max_guest_capacity": detail.max_guest_capacity,
+            "meal_plans": detail.meal_plans or [],
+            "parking_available": detail.parking_available,
+            "wifi_available": detail.wifi_available,
+            "pets_allowed": detail.pets_allowed,
+            "smoking_policy": detail.smoking_policy,
+            "cancellation_policy": detail.cancellation_policy,
+            "extra_bed_policy": detail.extra_bed_policy,
+            "check_in_notes": detail.check_in_notes,
+            "check_out_notes": detail.check_out_notes,
         }
 
     def _build_tour_detail(self, listing: Listing) -> dict | None:
@@ -357,6 +428,24 @@ class AdminDashboardService:
             "duration_days": detail.duration_days,
             "route_summary": detail.route_summary,
             "meeting_point": detail.meeting_point,
+            "itinerary_highlights": detail.itinerary_highlights or [],
+            "included_items": detail.included_items or [],
+            "excluded_items": detail.excluded_items or [],
+            "languages": detail.languages or [],
+            "difficulty_level": detail.difficulty_level,
+            "group_size_min": detail.group_size_min,
+            "group_size_max": detail.group_size_max,
+            "private_available": detail.private_available,
+            "pickup_available": detail.pickup_available,
+            "dropoff_available": detail.dropoff_available,
+            "pickup_notes": detail.pickup_notes,
+            "dropoff_notes": detail.dropoff_notes,
+            "start_time": detail.start_time.isoformat() if detail.start_time else None,
+            "end_time": detail.end_time.isoformat() if detail.end_time else None,
+            "cancellation_policy": detail.cancellation_policy,
+            "what_to_bring": detail.what_to_bring or [],
+            "child_policy": detail.child_policy,
+            "accessibility_info": detail.accessibility_info,
         }
 
     def _build_safari_detail(self, listing: Listing) -> dict | None:
@@ -369,6 +458,22 @@ class AdminDashboardService:
             "duration_minutes": detail.duration_minutes,
             "guide_included": detail.guide_included,
             "pickup_supported": detail.pickup_supported,
+            "start_time": detail.start_time.isoformat() if detail.start_time else None,
+            "end_time": detail.end_time.isoformat() if detail.end_time else None,
+            "included_items": detail.included_items or [],
+            "excluded_items": detail.excluded_items or [],
+            "languages": detail.languages or [],
+            "difficulty_level": detail.difficulty_level,
+            "age_restriction": detail.age_restriction,
+            "private_available": detail.private_available,
+            "group_size_min": detail.group_size_min,
+            "group_size_max": detail.group_size_max,
+            "pickup_notes": detail.pickup_notes,
+            "what_to_bring": detail.what_to_bring or [],
+            "cancellation_policy": detail.cancellation_policy,
+            "accessibility_info": detail.accessibility_info,
+            "best_season": detail.best_season,
+            "wildlife_highlights": detail.wildlife_highlights or [],
         }
 
     def _build_transfer_detail(self, listing: Listing) -> dict | None:
@@ -379,6 +484,22 @@ class AdminDashboardService:
             "origin_type": detail.origin_type,
             "destination_type": detail.destination_type,
             "vehicle_policy": detail.vehicle_policy,
+            "vehicle_types": detail.vehicle_types or [],
+            "max_passengers": detail.max_passengers,
+            "max_luggage": detail.max_luggage,
+            "air_conditioned": detail.air_conditioned,
+            "meet_and_greet_included": detail.meet_and_greet_included,
+            "child_seats_available": detail.child_seats_available,
+            "pickup_instructions": detail.pickup_instructions,
+            "dropoff_instructions": detail.dropoff_instructions,
+            "operating_start_time": detail.operating_start_time.isoformat() if detail.operating_start_time else None,
+            "operating_end_time": detail.operating_end_time.isoformat() if detail.operating_end_time else None,
+            "estimated_duration_minutes": detail.estimated_duration_minutes,
+            "route_notes": detail.route_notes,
+            "included_items": detail.included_items or [],
+            "excluded_items": detail.excluded_items or [],
+            "cancellation_policy": detail.cancellation_policy,
+            "waiting_time_policy": detail.waiting_time_policy,
         }
 
     def _not_found(self, message: str) -> AdminAPIError:

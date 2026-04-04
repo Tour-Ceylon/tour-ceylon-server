@@ -1,4 +1,5 @@
 from app.schemas.admin.addons import AddOnCreate, AddOnResponse
+from app.schemas.admin.destinations import AdminDestinationOption
 from app.schemas.admin.listings import (
     ActivityListingCreate,
     ActivityListingResponse,
@@ -13,4 +14,3 @@ from app.schemas.admin.listings import (
 from app.schemas.admin.packages import PackageCreate, PackageResponse, PackageUpdate
 from app.schemas.admin.settings import AdminSettingsResponse, AdminSettingsUpdate
 from app.schemas.admin.snapshot import AdminSnapshotResponse
-

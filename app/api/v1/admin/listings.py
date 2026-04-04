@@ -37,7 +37,7 @@ async def create_stay_listing(
     payload: StayListingCreate,
     service: AdminDashboardService = Depends(get_admin_service),
 ):
-    return service.create_listing("stay", payload.model_dump())
+    return service.create_listing("stay", payload.model_dump(by_alias=False))
 
 
 @router.post(
@@ -50,7 +50,7 @@ async def create_tour_listing(
     payload: TourListingCreate,
     service: AdminDashboardService = Depends(get_admin_service),
 ):
-    return service.create_listing("tour", payload.model_dump())
+    return service.create_listing("tour", payload.model_dump(by_alias=False))
 
 
 @router.post(
@@ -63,7 +63,7 @@ async def create_activity_listing(
     payload: ActivityListingCreate,
     service: AdminDashboardService = Depends(get_admin_service),
 ):
-    return service.create_listing("activity", payload.model_dump())
+    return service.create_listing("activity", payload.model_dump(by_alias=False))
 
 
 @router.post(
@@ -76,7 +76,7 @@ async def create_transfer_listing(
     payload: TransferListingCreate,
     service: AdminDashboardService = Depends(get_admin_service),
 ):
-    return service.create_listing("transfer", payload.model_dump())
+    return service.create_listing("transfer", payload.model_dump(by_alias=False))
 
 
 @router.patch(
@@ -90,7 +90,11 @@ async def update_listing(
     payload: ListingUpdateRequest,
     service: AdminDashboardService = Depends(get_admin_service),
 ):
-    return service.update_listing(category, listing_id, payload.model_dump(exclude_unset=True))
+    return service.update_listing(
+        category,
+        listing_id,
+        payload.model_dump(by_alias=False, exclude_unset=True),
+    )
 
 
 @router.delete("/{category}/{listing_id}", status_code=status.HTTP_204_NO_CONTENT)
