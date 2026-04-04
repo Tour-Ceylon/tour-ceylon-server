@@ -167,3 +167,9 @@ FRONTEND_API_MIGRATION_GUIDE.md
 frontend-contract-examples.json
 openapi.json
 scripts/
+
+LISTING_API_DOCUMENTATION.md
+LISTING_CATEGORY_REFERENCE.md
+alembic/
+
+tests/
