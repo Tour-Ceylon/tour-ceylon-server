@@ -7,7 +7,6 @@ from app.models.enum import BookingStatus
 
 
 class BookingBase(BaseModel):
-<<<<<<< Updated upstream
     """Base booking schema with common fields"""
     user_id: UUID
     listing_id: UUID
@@ -45,41 +44,13 @@ class BookingUpdate(BaseModel):
     unit_price_minor: Optional[int] = None
     total_price_minor: Optional[int] = None
     status: Optional[BookingStatus] = None
-=======
-    listing_id: UUID
-    travel_date: datetime
-    travel_count: int = Field(ge=1)
-    unit_price_minor: int = Field(ge=0)
-    total_price_minor: int = Field(ge=0)
-    status: BookingStatus = BookingStatus.PENDING_PAYMENT
-
-
-class BookingCreateRequest(BookingBase):
-    """Create booking payload for authenticated users. Ownership is derived from the bearer token."""
-    pass
-
-
-class BookingUpdate(BaseModel):
-    listing_id: UUID | None = None
-    travel_date: datetime | None = None
-    travel_count: int | None = Field(default=None, ge=1)
-    unit_price_minor: int | None = Field(default=None, ge=0)
-    total_price_minor: int | None = Field(default=None, ge=0)
-    status: BookingStatus | None = None
->>>>>>> Stashed changes
 
 
 class BookingResponse(BookingBase):
     """Schema for booking API responses"""
     id: UUID
-<<<<<<< Updated upstream
     created_at: datetime
     
-=======
-    user_id: UUID
-    created_at: datetime
-
->>>>>>> Stashed changes
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -98,7 +69,6 @@ class BookingListResponse(BaseModel):
 
 
 class BookingSearchParams(BaseModel):
-<<<<<<< Updated upstream
     """Schema for booking search parameters"""
     user_id: Optional[UUID] = None
     listing_id: Optional[UUID] = None
@@ -107,18 +77,6 @@ class BookingSearchParams(BaseModel):
     travel_date_to: Optional[datetime] = None
     min_price: Optional[int] = None
     max_price: Optional[int] = None
-=======
-    user_id: UUID | None = None
-    listing_id: UUID | None = None
-    variant_id: UUID | None = None
-    status: BookingStatus | None = None
-    booked_at_from: datetime | None = None
-    booked_at_to: datetime | None = None
-    travel_date_from: date | None = None
-    travel_date_to: date | None = None
-    min_price: Decimal | None = None
-    max_price: Decimal | None = None
->>>>>>> Stashed changes
     page: int = 1
     per_page: int = 20
 

@@ -1,9 +1,5 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
-<<<<<<< Updated upstream
-=======
-from typing import Callable
->>>>>>> Stashed changes
 from uuid import UUID
 
 import httpx
@@ -172,39 +168,5 @@ def get_current_user(
 	return resolve_or_create_local_user(auth_identity, user_repo)
 
 
-<<<<<<< Updated upstream
 def get_current_user_id(current_user: User = Depends(get_current_user)) -> UUID:
 	return current_user.id
-=======
-def get_current_local_user(
-	auth_identity: AuthIdentity = Depends(get_auth_identity),
-	db: Session = Depends(get_db),
-) -> User:
-	return get_current_user(auth_identity=auth_identity, db=db)
-
-
-def get_current_user_id(current_user: User = Depends(get_current_user)) -> UUID:
-	return current_user.id
-
-
-def require_admin(current_user: User = Depends(get_current_user)) -> User:
-	"""Dependency that enforces current user has admin role. Raises 403 if not."""
-	if current_user.role != UserRole.ADMIN:
-		raise HTTPException(
-			status_code=status.HTTP_403_FORBIDDEN,
-			detail="Admin role required"
-		)
-	return current_user
-
-
-def require_roles(*allowed_roles: UserRole) -> Callable[..., User]:
-	"""Factory to create a dependency that enforces one of the specified roles."""
-	def check_role(current_user: User = Depends(get_current_user)) -> User:
-		if current_user.role not in allowed_roles:
-			raise HTTPException(
-				status_code=status.HTTP_403_FORBIDDEN,
-				detail=f"One of these roles required: {', '.join(r.value for r in allowed_roles)}"
-			)
-		return current_user
-	return check_role
->>>>>>> Stashed changes

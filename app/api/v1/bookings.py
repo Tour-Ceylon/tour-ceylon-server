@@ -1,12 +1,10 @@
-import math
 from typing import List
 from uuid import UUID
-
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
+import math
 
 from app.config.database import get_db
-<<<<<<< Updated upstream
 from app.api.deps import get_current_user_id
 from app.repositories.booking_repo import BookingRepository
 from app.schemas.booking_schema import (
@@ -15,27 +13,13 @@ from app.schemas.booking_schema import (
     BookingUpdate, 
     BookingResponse, 
     BookingListResponse, 
-=======
-from app.api.deps import get_current_user, require_admin
-from app.models.user import User
-from app.repositories.booking_repo import BookingRepository
-from app.schemas.booking_schema import (
-    BookingCreateRequest,
-    BookingUpdate,
-    BookingResponse,
-    BookingListResponse,
->>>>>>> Stashed changes
     BookingSearchParams,
     BookingStatusUpdate,
     BookingSummary
 )
 from app.models.enum import BookingStatus
 
-public_router = APIRouter(prefix="/bookings", tags=["bookings"])
-admin_router = APIRouter(prefix="/bookings", tags=["bookings"], dependencies=[Depends(require_admin)])
 router = APIRouter()
-router.include_router(public_router)
-router.include_router(admin_router)
 
 
 def get_booking_repository(db: Session = Depends(get_db)) -> BookingRepository:
@@ -43,10 +27,9 @@ def get_booking_repository(db: Session = Depends(get_db)) -> BookingRepository:
     return BookingRepository(db)
 
 
-@public_router.post("/", response_model=BookingResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=BookingResponse, status_code=status.HTTP_201_CREATED)
 async def create_booking(
     booking_data: BookingCreateRequest,
-<<<<<<< Updated upstream
     current_user_id: UUID = Depends(get_current_user_id),
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
@@ -68,34 +51,21 @@ async def create_booking(
         booking_for_create.listing_id,
         booking_for_create.travel_date,
     ):
-=======
-    current_user: User = Depends(get_current_user),
-    booking_repo: BookingRepository = Depends(get_booking_repository)
-):
-    """Create a new booking for the authenticated user."""
-
-    if booking_repo.exists_booking(current_user.id, booking_data.listing_id, booking_data.travel_date):
->>>>>>> Stashed changes
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Booking already exists for this user, listing and travel date"
         )
     
     try:
-<<<<<<< Updated upstream
         booking = booking_repo.create(booking_for_create)
-=======
-        booking = booking_repo.create(current_user.id, booking_data)
->>>>>>> Stashed changes
         return booking
-    except Exception:
+    except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create booking"
         )
 
 
-<<<<<<< Updated upstream
 @router.get("/me", response_model=List[BookingResponse])
 async def get_my_bookings(
     current_user_id: UUID = Depends(get_current_user_id),
@@ -136,31 +106,9 @@ async def get_my_booking_stats(
 
 
 @router.get("/{booking_id}", response_model=BookingResponse)
-=======
-@public_router.get("/me", response_model=List[BookingResponse])
-async def get_my_bookings(
-    current_user: User = Depends(get_current_user),
-    booking_repo: BookingRepository = Depends(get_booking_repository),
-):
-    return booking_repo.get_by_user_id(current_user.id)
-
-
-@public_router.get("/me/{booking_id}", response_model=BookingResponse)
-async def get_my_booking(
-    booking_id: UUID,
-    current_user: User = Depends(get_current_user),
-    booking_repo: BookingRepository = Depends(get_booking_repository),
-):
-    booking = booking_repo.get_by_id(booking_id)
-    if not booking or booking.user_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
-    return booking
-
-
-@admin_router.get("/{booking_id}", response_model=BookingResponse)
->>>>>>> Stashed changes
 async def get_booking(
     booking_id: UUID,
+    db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
     """Get booking by ID"""
@@ -175,13 +123,10 @@ async def get_booking(
     return booking
 
 
-@admin_router.get("/user/{user_id}", response_model=List[BookingResponse])
+@router.get("/user/{user_id}", response_model=List[BookingResponse])
 async def get_bookings_by_user(
     user_id: UUID,
-<<<<<<< Updated upstream
     current_user_id: UUID = Depends(get_current_user_id),
-=======
->>>>>>> Stashed changes
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
     """Get all bookings for a specific user"""
@@ -195,9 +140,10 @@ async def get_bookings_by_user(
     return bookings
 
 
-@admin_router.get("/listing/{listing_id}", response_model=List[BookingResponse])
+@router.get("/listing/{listing_id}", response_model=List[BookingResponse])
 async def get_bookings_by_listing(
     listing_id: UUID,
+    db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
     """Get all bookings for a specific listing"""
@@ -206,16 +152,12 @@ async def get_bookings_by_listing(
     return bookings
 
 
-@admin_router.get("/", response_model=BookingListResponse)
+@router.get("/", response_model=BookingListResponse)
 async def get_bookings(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
-<<<<<<< Updated upstream
     status: BookingStatus = Query(None),
     db: Session = Depends(get_db),
-=======
-    status: BookingStatus | None = Query(None),
->>>>>>> Stashed changes
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
     """Get all bookings with pagination"""
@@ -232,9 +174,10 @@ async def get_bookings(
     )
 
 
-@admin_router.post("/search", response_model=BookingListResponse)
+@router.post("/search", response_model=BookingListResponse)
 async def search_bookings(
     search_params: BookingSearchParams,
+    db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
     """Search bookings with filters"""
@@ -250,10 +193,11 @@ async def search_bookings(
     )
 
 
-@admin_router.put("/{booking_id}", response_model=BookingResponse)
+@router.put("/{booking_id}", response_model=BookingResponse)
 async def update_booking(
     booking_id: UUID,
     booking_data: BookingUpdate,
+    db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
     """Update booking by ID"""
@@ -276,9 +220,10 @@ async def update_booking(
         )
 
 
-@admin_router.delete("/{booking_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{booking_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_booking(
     booking_id: UUID,
+    db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
     """Delete booking by ID (hard delete)"""
@@ -291,10 +236,11 @@ async def delete_booking(
         )
 
 
-@admin_router.patch("/{booking_id}/status", response_model=BookingResponse)
+@router.patch("/{booking_id}/status", response_model=BookingResponse)
 async def update_booking_status(
     booking_id: UUID,
     status_update: BookingStatusUpdate,
+    db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
     """Update booking status"""
@@ -309,9 +255,10 @@ async def update_booking_status(
     return booking
 
 
-@admin_router.patch("/{booking_id}/confirm", response_model=BookingResponse)
+@router.patch("/{booking_id}/confirm", response_model=BookingResponse)
 async def confirm_booking(
     booking_id: UUID,
+    db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
     """Confirm booking (set status to CONFIRMED)"""
@@ -326,9 +273,10 @@ async def confirm_booking(
     return booking
 
 
-@admin_router.patch("/{booking_id}/cancel", response_model=BookingResponse)
+@router.patch("/{booking_id}/cancel", response_model=BookingResponse)
 async def cancel_booking(
     booking_id: UUID,
+    db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
     """Cancel booking (set status to CANCELLED)"""
@@ -343,9 +291,10 @@ async def cancel_booking(
     return booking
 
 
-@admin_router.patch("/{booking_id}/complete", response_model=BookingResponse)
+@router.patch("/{booking_id}/complete", response_model=BookingResponse)
 async def complete_booking(
     booking_id: UUID,
+    db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
     """Complete booking (set status to COMPLETED)"""
@@ -360,9 +309,10 @@ async def complete_booking(
     return booking
 
 
-@admin_router.get("/status/{status}", response_model=List[BookingResponse])
+@router.get("/status/{status}", response_model=List[BookingResponse])
 async def get_bookings_by_status(
     status: BookingStatus,
+    db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
     """Get all bookings by status"""
@@ -371,14 +321,11 @@ async def get_bookings_by_status(
     return bookings
 
 
-@admin_router.get("/user/{user_id}/status/{status}", response_model=List[BookingResponse])
+@router.get("/user/{user_id}/status/{status}", response_model=List[BookingResponse])
 async def get_user_bookings_by_status(
     user_id: UUID,
     status: BookingStatus,
-<<<<<<< Updated upstream
     current_user_id: UUID = Depends(get_current_user_id),
-=======
->>>>>>> Stashed changes
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
     """Get user bookings by status"""
@@ -392,10 +339,11 @@ async def get_user_bookings_by_status(
     return bookings
 
 
-@admin_router.get("/listing/{listing_id}/status/{status}", response_model=List[BookingResponse])
+@router.get("/listing/{listing_id}/status/{status}", response_model=List[BookingResponse])
 async def get_listing_bookings_by_status(
     listing_id: UUID,
     status: BookingStatus,
+    db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
     """Get listing bookings by status"""
@@ -404,8 +352,9 @@ async def get_listing_bookings_by_status(
     return bookings
 
 
-@admin_router.get("/stats/summary", response_model=BookingSummary)
+@router.get("/stats/summary", response_model=BookingSummary)
 async def get_booking_stats(
+    db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
     """Get booking statistics summary"""
@@ -415,11 +364,7 @@ async def get_booking_stats(
     
     return BookingSummary(
         total_bookings=sum(status_counts.values()),
-<<<<<<< Updated upstream
         pending_payment=status_counts.get(BookingStatus.PENDING_PAYMENT, 0),
-=======
-        pending=status_counts.get(BookingStatus.PENDING_PAYMENT, 0),
->>>>>>> Stashed changes
         confirmed=status_counts.get(BookingStatus.CONFIRMED, 0),
         cancelled=status_counts.get(BookingStatus.CANCELLED, 0),
         completed=status_counts.get(BookingStatus.COMPLETED, 0),
@@ -427,14 +372,10 @@ async def get_booking_stats(
     )
 
 
-@admin_router.get("/stats/revenue")
+@router.get("/stats/revenue")
 async def get_revenue_stats(
-<<<<<<< Updated upstream
     status: BookingStatus = Query(None),
     db: Session = Depends(get_db),
-=======
-    status: BookingStatus | None = Query(None),
->>>>>>> Stashed changes
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
     """Get revenue statistics"""
@@ -451,13 +392,10 @@ async def get_revenue_stats(
     }
 
 
-@admin_router.get("/user/{user_id}/stats")
+@router.get("/user/{user_id}/stats")
 async def get_user_booking_stats(
     user_id: UUID,
-<<<<<<< Updated upstream
     current_user_id: UUID = Depends(get_current_user_id),
-=======
->>>>>>> Stashed changes
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
     """Get booking statistics for a specific user"""
@@ -481,9 +419,10 @@ async def get_user_booking_stats(
     }
 
 
-@admin_router.get("/listing/{listing_id}/stats")
+@router.get("/listing/{listing_id}/stats")
 async def get_listing_booking_stats(
     listing_id: UUID,
+    db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
     """Get booking statistics for a specific listing"""
