@@ -5,14 +5,23 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user_id
 from app.config.database import get_db
+<<<<<<< Updated upstream
 from app.models.enum import UserRole
 from app.models.user import User
 from app.repositories.user_repo import UserRepository
+=======
+from app.api.deps import require_admin
+from app.models.user import User
+>>>>>>> Stashed changes
 from app.services.admin.dashboard_service import AdminDashboardService
 
 
-def get_admin_service(db: Session = Depends(get_db)) -> AdminDashboardService:
-    return AdminDashboardService(db)
+def get_admin_service(
+	admin_user: User = Depends(require_admin),
+	db: Session = Depends(get_db),
+) -> AdminDashboardService:
+	"""Provides AdminDashboardService only after verifying current user is admin."""
+	return AdminDashboardService(db)
 
 
 def require_admin_user(

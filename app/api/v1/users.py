@@ -1,15 +1,20 @@
+import math
 from typing import List
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-import math
 
 from app.config.database import get_db
 from app.api.deps import (
     AuthIdentity,
     get_auth_identity,
     get_current_user,
+<<<<<<< Updated upstream
     get_current_user_id,
+=======
+    require_admin,
+>>>>>>> Stashed changes
     resolve_or_create_local_user,
 )
 from app.repositories.user_repo import UserRepository
@@ -23,7 +28,11 @@ from app.schemas.user_schema import (
 from app.models.enum import UserRole
 from app.models.user import User
 
+public_router = APIRouter(prefix="/users", tags=["users"])
+admin_router = APIRouter(prefix="/users", tags=["users"], dependencies=[Depends(require_admin)])
 router = APIRouter()
+router.include_router(public_router)
+router.include_router(admin_router)
 
 
 def get_user_repository(db: Session = Depends(get_db)) -> UserRepository:
@@ -31,7 +40,11 @@ def get_user_repository(db: Session = Depends(get_db)) -> UserRepository:
     return UserRepository(db)
 
 
+<<<<<<< Updated upstream
 @router.get("/me", response_model=UserResponse)
+=======
+@public_router.get("/me", response_model=UserResponse)
+>>>>>>> Stashed changes
 async def get_me(
     current_user: User = Depends(get_current_user),
 ):
@@ -39,7 +52,11 @@ async def get_me(
     return current_user
 
 
+<<<<<<< Updated upstream
 @router.post("/sync", response_model=UserResponse)
+=======
+@public_router.post("/sync", response_model=UserResponse)
+>>>>>>> Stashed changes
 async def sync_me(
     auth_identity: AuthIdentity = Depends(get_auth_identity),
     user_repo: UserRepository = Depends(get_user_repository),
@@ -48,7 +65,11 @@ async def sync_me(
     return resolve_or_create_local_user(auth_identity, user_repo)
 
 
+<<<<<<< Updated upstream
 @router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+=======
+@admin_router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+>>>>>>> Stashed changes
 async def create_user(
     user_data: UserCreate,
     user_repo: UserRepository = Depends(get_user_repository)
@@ -72,7 +93,11 @@ async def create_user(
         )
 
 
+<<<<<<< Updated upstream
 @router.get("/stats/roles")
+=======
+@admin_router.get("/stats/roles")
+>>>>>>> Stashed changes
 async def get_user_role_stats(
     db: Session = Depends(get_db),
     user_repo: UserRepository = Depends(get_user_repository)
@@ -91,21 +116,30 @@ async def get_user_role_stats(
     }
 
 
-@router.get("/email/{email}", response_model=UserResponse)
+@admin_router.get("/email/{email}", response_model=UserResponse)
 async def get_user_by_email(
     email: str,
+<<<<<<< Updated upstream
     current_user_id: UUID = Depends(get_current_user_id),
     user_repo: UserRepository = Depends(get_user_repository)
 ):
     """Get user by email for authenticated self only"""
     
     user = user_repo.get_by_id(current_user_id)
+=======
+    user_repo: UserRepository = Depends(get_user_repository)
+):
+    """Get any user by email (admin-only)."""
+
+    user = user_repo.get_by_email(email)
+>>>>>>> Stashed changes
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
 
+<<<<<<< Updated upstream
     if user.email.lower() != email.lower():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -116,10 +150,15 @@ async def get_user_by_email(
 
 
 @router.put("/{user_id}", response_model=UserResponse)
+=======
+    return user
+
+
+@admin_router.put("/{user_id}", response_model=UserResponse)
+>>>>>>> Stashed changes
 async def update_user(
     user_id: UUID,
     user_data: UserUpdate,
-    db: Session = Depends(get_db),
     user_repo: UserRepository = Depends(get_user_repository)
 ):
     """Update user by ID"""
@@ -149,10 +188,9 @@ async def update_user(
         )
 
 
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@admin_router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: UUID,
-    db: Session = Depends(get_db),
     user_repo: UserRepository = Depends(get_user_repository)
 ):
     """Delete user by ID (hard delete)"""
@@ -165,10 +203,9 @@ async def delete_user(
         )
 
 
-@router.patch("/{user_id}/deactivate", response_model=UserResponse)
+@admin_router.patch("/{user_id}/deactivate", response_model=UserResponse)
 async def deactivate_user(
     user_id: UUID,
-    db: Session = Depends(get_db),
     user_repo: UserRepository = Depends(get_user_repository)
 ):
     """Deactivate user (soft delete)"""
@@ -183,10 +220,9 @@ async def deactivate_user(
     return user
 
 
-@router.patch("/{user_id}/activate", response_model=UserResponse)
+@admin_router.patch("/{user_id}/activate", response_model=UserResponse)
 async def activate_user(
     user_id: UUID,
-    db: Session = Depends(get_db),
     user_repo: UserRepository = Depends(get_user_repository)
 ):
     """Activate user"""
@@ -201,10 +237,9 @@ async def activate_user(
     return user
 
 
-@router.get("/role/{role}", response_model=List[UserResponse])
+@admin_router.get("/role/{role}", response_model=List[UserResponse])
 async def get_users_by_role(
     role: UserRole,
-    db: Session = Depends(get_db),
     user_repo: UserRepository = Depends(get_user_repository)
 ):
     """Get all users by role"""
@@ -213,10 +248,9 @@ async def get_users_by_role(
     return users
 
 
-@router.get("/country/{country}", response_model=List[UserResponse])
+@admin_router.get("/country/{country}", response_model=List[UserResponse])
 async def get_users_by_country(
     country: str,
-    db: Session = Depends(get_db),
     user_repo: UserRepository = Depends(get_user_repository)
 ):
     """Get all users by country"""
@@ -225,10 +259,16 @@ async def get_users_by_country(
     return users
 
 
+<<<<<<< Updated upstream
 @router.post("/search", response_model=UserListResponse)
 async def search_users(
     search_params: UserSearchParams,
     db: Session = Depends(get_db),
+=======
+@admin_router.post("/search", response_model=UserListResponse)
+async def search_users(
+    search_params: UserSearchParams,
+>>>>>>> Stashed changes
     user_repo: UserRepository = Depends(get_user_repository)
 ):
     """Search users with filters"""
@@ -244,12 +284,19 @@ async def search_users(
     )
 
 
+<<<<<<< Updated upstream
 @router.get("/", response_model=UserListResponse)
+=======
+@admin_router.get("/", response_model=UserListResponse)
+>>>>>>> Stashed changes
 async def get_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     is_active: bool = Query(None),
+<<<<<<< Updated upstream
     db: Session = Depends(get_db),
+=======
+>>>>>>> Stashed changes
     user_repo: UserRepository = Depends(get_user_repository)
 ):
     """Get all users with pagination"""
@@ -266,10 +313,16 @@ async def get_users(
     )
 
 
+<<<<<<< Updated upstream
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(
     user_id: UUID,
     db: Session = Depends(get_db),
+=======
+@admin_router.get("/{user_id}", response_model=UserResponse)
+async def get_user(
+    user_id: UUID,
+>>>>>>> Stashed changes
     user_repo: UserRepository = Depends(get_user_repository)
 ):
     """Get user by ID"""

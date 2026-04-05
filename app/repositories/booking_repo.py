@@ -7,15 +7,20 @@ from sqlalchemy.orm import Session
 
 from app.models.booking import Booking
 from app.models.enum import BookingStatus
-from app.schemas.booking_schema import BookingCreate, BookingSearchParams, BookingUpdate
+from app.schemas.booking_schema import BookingCreateRequest, BookingSearchParams, BookingUpdate
 
 
 class BookingRepository:
 	def __init__(self, db: Session):
 		self.db = db
 
+<<<<<<< Updated upstream
 	def create(self, booking_data: BookingCreate) -> Booking:
 		booking = Booking(**booking_data.model_dump())
+=======
+	def create(self, user_id: UUID, booking_data: BookingCreateRequest) -> Booking:
+		booking = Booking(user_id=user_id, **booking_data.model_dump())
+>>>>>>> Stashed changes
 		self.db.add(booking)
 		self.db.commit()
 		self.db.refresh(booking)
