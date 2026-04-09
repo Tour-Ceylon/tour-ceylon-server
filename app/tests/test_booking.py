@@ -14,6 +14,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
 
 from app.api.v1 import bookings as booking_routes
 from app.api.v1 import listing as listing_routes
+from app.api.deps import get_current_user
 from app.config.database import get_db
 from app.models.base import Base
 from app.models.destination import Destination
@@ -30,6 +31,7 @@ from app.models.enum import (
 from app.models.listing import Listing
 from app.models.listingVariant import ListingVariant
 from app.models.user import User
+from fastapi import HTTPException, status
 
 
 @pytest.fixture
@@ -61,7 +63,17 @@ def client(db_session):
         finally:
             pass
 
+    def override_get_current_user():
+        user = db_session.query(User).first()
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing authenticated test user",
+            )
+        return user
+
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = override_get_current_user
     return TestClient(app)
 
 
@@ -102,7 +114,7 @@ def booking_seed(db_session):
         email="traveler@example.com",
         full_name="Traveler",
         country="Sri Lanka",
-        role=UserRole.TOURIST,
+        role=UserRole.ADMIN,
         is_active=True,
     )
     db_session.add_all([variant, user])
@@ -269,3 +281,24 @@ def test_booking_stats_uses_model_first_aggregate_field_names(client, booking_se
     assert "total_revenue" in summary_response.json()
     assert "total_revenue" in revenue_response.json()
     assert "total_revenue_minor" not in revenue_response.json()
+
+
+def test_checkout_booking_creates_booking_from_client_payload(client, booking_seed):
+    response = client.post(
+        "/bookings/checkout",
+        json={
+            "listing_id": str(booking_seed["listing"].id),
+            "travel_date": "2026-04-25T09:00:00",
+            "travel_count": 2,
+            "unit_price_minor": 17500,
+            "total_price_minor": 35000,
+            "status": "pending",
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["listing_id"] == str(booking_seed["listing"].id)
+    assert payload["travel_count"] == 2
+    assert payload["unit_price_minor"] == 17500
+    assert payload["status"] == "pending"

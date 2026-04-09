@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 import math
 
 from app.config.database import get_db
+from app.models.user import User
 from app.repositories.user_repo import UserRepository
 from app.schemas.user_schema import (
     UserCreate, 
@@ -14,6 +15,7 @@ from app.schemas.user_schema import (
     UserSearchParams
 )
 from app.models.enum import UserRole
+from app.api.deps import get_current_user
 
 router = APIRouter()
 
@@ -21,6 +23,26 @@ router = APIRouter()
 def get_user_repository(db: Session = Depends(get_db)) -> UserRepository:
     """Dependency to get user repository"""
     return UserRepository(db)
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_current_user_profile(
+    current_user: User = Depends(get_current_user),
+):
+    """Get the current authenticated user's profile."""
+    return current_user
+
+
+@router.post("/sync", response_model=UserResponse)
+async def sync_current_user(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Sync endpoint: ensures Clerk token user is linked/provisioned in local DB.
+    Returns the current local backend user record.
+    Idempotent: safe to call repeatedly.
+    """
+    return current_user
 
 
 @router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)

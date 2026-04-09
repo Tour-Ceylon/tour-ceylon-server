@@ -330,3 +330,44 @@ def get_auth_context(
         supabase_access_token=supabase_access_token,
         clerk_claims=claims,
     )
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User:
+    """
+    Dependency: return the authenticated User model object.
+    Verifies Clerk token and resolves/provisions local user.
+    Raises 401 if unauthenticated or unlinked.
+    """
+    if not credentials:
+        logger.warning("auth.missing_authorization_header")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing Authorization header",
+        )
+
+    claims = _decode_and_verify_clerk_token(credentials.credentials)
+    user = _resolve_local_user(db=db, claims=claims)
+    return user
+
+
+def require_admin(
+    user: User = Depends(get_current_user),
+) -> User:
+    """
+    Dependency: enforce admin role on protected routes.
+    Returns the authenticated User if admin; raises 403 otherwise.
+    """
+    from app.models.enum import UserRole
+    
+    if user.role != UserRole.ADMIN:
+        logger.warning("auth.admin_denied user_id=%s role=%s", user.id, user.role)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+    
+    logger.debug("auth.admin_granted user_id=%s", user.id)
+    return user

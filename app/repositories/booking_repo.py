@@ -24,11 +24,11 @@ class BookingRepository:
             joinedload(Booking.booking_items).joinedload(BookingItem.travelers)
         )
 
-    def create(self, booking_data: BookingCreate) -> Booking:
+    def create(self, booking_data: BookingCreate, owner_user_id: UUID) -> Booking:
         booking_payload = booking_data.model_dump()
         item_payloads = booking_payload.pop("booking_items")
 
-        db_booking = Booking(**booking_payload)
+        db_booking = Booking(user_id=owner_user_id, **booking_payload)
         self.db.add(db_booking)
         self.db.flush()
 

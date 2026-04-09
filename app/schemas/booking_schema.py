@@ -49,7 +49,6 @@ class BookingItemResponse(BookingItemBase):
 
 class BookingBase(BaseModel):
     booking_reference: str
-    user_id: UUID
     status: BookingStatus = BookingStatus.PENDING
     total_amount: Decimal
     currency: CurrencyCode = CurrencyCode.USD
@@ -61,9 +60,17 @@ class BookingCreate(BookingBase):
     booking_items: list[BookingItemCreate] = Field(min_length=1)
 
 
+class CheckoutBookingCreate(BaseModel):
+    listing_id: UUID
+    travel_date: datetime
+    travel_count: int = Field(ge=1)
+    unit_price_minor: int = Field(ge=0)
+    total_price_minor: int = Field(ge=0)
+    status: BookingStatus = BookingStatus.PENDING
+
+
 class BookingUpdate(BaseModel):
     booking_reference: str | None = None
-    user_id: UUID | None = None
     status: BookingStatus | None = None
     total_amount: Decimal | None = None
     currency: CurrencyCode | None = None
@@ -74,6 +81,7 @@ class BookingUpdate(BaseModel):
 
 class BookingResponse(BookingBase):
     id: UUID
+    user_id: UUID
     booking_items: list[BookingItemResponse]
     created_at: datetime
     updated_at: datetime
@@ -83,6 +91,18 @@ class BookingResponse(BookingBase):
 
 class BookingInDB(BookingResponse):
     pass
+
+
+class CheckoutBookingResponse(BaseModel):
+    id: UUID
+    user_id: UUID
+    listing_id: UUID
+    travel_date: datetime
+    travel_count: int
+    unit_price_minor: int
+    total_price_minor: int
+    status: BookingStatus
+    created_at: datetime
 
 
 class BookingListResponse(BaseModel):
