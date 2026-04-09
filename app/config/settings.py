@@ -2,7 +2,7 @@
 # Placeholderfrom functools import lru_cache
 from typing import List, Optional
 from functools import lru_cache
-from pydantic import AnyHttpUrl, Field
+from pydantic import AnyHttpUrl, Field, field_validator
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -90,6 +90,7 @@ class Settings(BaseSettings):
     CLOUDINARY_CLOUD_NAME: Optional[str] = None
     CLOUDINARY_API_KEY: Optional[str] = None
     CLOUDINARY_API_SECRET: Optional[str] = None
+    CLOUDINARY_FOLDER: Optional[str] = "tour-ceylon"
 
     # ---------------------------------------------------
     # SECURITY
@@ -123,6 +124,19 @@ class Settings(BaseSettings):
         if self.CLERK_JWT_PUBLIC_KEY:
             return self.CLERK_JWT_PUBLIC_KEY.replace("\\n", "\n")
         return None
+
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def parse_debug(cls, value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on", "debug", "development"}:
+                return True
+            if normalized in {"0", "false", "no", "off", "release", "production"}:
+                return False
+        return value
 
 
 # ---------------------------------------------------
