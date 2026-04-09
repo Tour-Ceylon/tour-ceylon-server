@@ -250,8 +250,11 @@ def _resolve_local_user(db: Session, claims: dict) -> User:
             )
 
     user = None
+    if subject:
+        user = db.query(User).filter(User.clerk_user_id == subject).first()
+
     if email:
-        user = db.query(User).filter(User.email == email).first()
+        user = user or db.query(User).filter(User.email == email).first()
 
     if user is None and subject:
         try:
@@ -260,12 +263,31 @@ def _resolve_local_user(db: Session, claims: dict) -> User:
         except ValueError:
             user = None
 
-    if user is None and email:
-        user = User(email=email, full_name=full_name, is_active=True)
+    did_update_user = False
+    if user is not None and subject and user.clerk_user_id != subject:
+        user.clerk_user_id = subject
+        did_update_user = True
+
+    if user is not None and full_name and user.full_name != full_name:
+        user.full_name = full_name
+        did_update_user = True
+
+    if did_update_user:
         db.add(user)
         db.commit()
         db.refresh(user)
-        logger.info("auth.user_auto_provisioned email=%s user_id=%s", email, user.id)
+
+    if user is None and email:
+        user = User(clerk_user_id=subject, email=email, full_name=full_name, is_active=True)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        logger.info(
+            "auth.user_auto_provisioned clerk_user_id=%s email=%s user_id=%s",
+            subject,
+            email,
+            user.id,
+        )
 
     if user is None:
         logger.warning("auth.user_not_linked sub=%s email=%s", subject, email)
@@ -291,6 +313,20 @@ def get_current_user_id(
     claims = _decode_and_verify_clerk_token(credentials.credentials)
     user = _resolve_local_user(db=db, claims=claims)
     return user.id
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User:
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing Authorization header",
+        )
+
+    claims = _decode_and_verify_clerk_token(credentials.credentials)
+    return _resolve_local_user(db=db, claims=claims)
 
 
 @dataclass

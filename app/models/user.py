@@ -9,6 +9,7 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "users"
 
     # Core fields
+    clerk_user_id = Column(String, unique=True, nullable=True, index=True)
     email = Column(String, unique=True, nullable=False, index=True)
     full_name = Column(String, nullable=True)
     country = Column(String, nullable=True)
