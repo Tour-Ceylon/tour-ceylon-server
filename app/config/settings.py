@@ -1,5 +1,10 @@
 import os
+from pathlib import Path
 from typing import List
+from dotenv import load_dotenv
+
+# Load .env from the project root (two levels up from this file: app/config/ -> app/ -> project root)
+load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent.parent / ".env")
 
 
 class Settings:

@@ -1,14 +1,10 @@
-from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models.base import Base
 from app.config.settings import settings
 
-# Load environment variables
-load_dotenv()
-
-# Use centralized settings
+# DATABASE_URL loaded from .env via settings
 DATABASE_URL = settings.DATABASE_URL
 
 if not DATABASE_URL:
