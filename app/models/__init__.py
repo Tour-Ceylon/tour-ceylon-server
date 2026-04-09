@@ -1,4 +1,5 @@
 from app.models.availabilityCalendar import AvailabilityCalendar
+from app.models.admin_dashboard import AddOn, AdminSettings, Package, PackageAddOn
 from app.models.booking import Booking, Bookings
 from app.models.bookingItem import BookingItem
 from app.models.bookingStatusHistory import BookingStatusHistory
@@ -9,6 +10,7 @@ from app.models.hotelDetail import HotelDetail
 from app.models.listing import Listing
 from app.models.listingMedia import ListingMedia
 from app.models.listingVariant import ListingVariant
+from app.models.media import MediaAsset
 from app.models.paymentTransactionHistory import PaymentTransaction
 from app.models.pricingRule import PricingRule
 from app.models.review import Review
@@ -20,6 +22,8 @@ from app.models.wishlist import Wishlist
 
 __all__ = [
     "AvailabilityCalendar",
+    "AddOn",
+    "AdminSettings",
     "Booking",
     "Bookings",
     "BookingItem",
@@ -31,7 +35,10 @@ __all__ = [
     "Listing",
     "ListingMedia",
     "ListingVariant",
+    "MediaAsset",
     "PaymentTransaction",
+    "Package",
+    "PackageAddOn",
     "PricingRule",
     "Review",
     "SafariDetail",

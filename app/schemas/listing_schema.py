@@ -13,6 +13,7 @@ from app.models.enum import (
     MediaType,
     TransferLocationType,
 )
+from app.schemas.media_schema import MediaAssetPublicResponse, MediaSummary
 
 
 class DestinationMapResponse(BaseModel):
@@ -435,7 +436,8 @@ class ListingResponse(BaseModel):
     tour_detail: TourDetailResponse | None = None
     safari_detail: SafariDetailResponse | None = None
     transfer_detail: TransferDetailResponse | None = None
-    media: list[ListingMediaResponse] = Field(default_factory=list)
+    cover_image: MediaSummary | None = None
+    gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

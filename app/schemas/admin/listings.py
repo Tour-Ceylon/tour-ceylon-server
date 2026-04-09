@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.enum import DestinationType, MediaType, PropertyType, SafariType, TransferLocationType
+from app.schemas.media_schema import MediaAssetPublicResponse, MediaSummary
 
 
 AdminListingCategory = Literal["stay", "tour", "activity", "transfer"]
@@ -220,7 +221,9 @@ class StayListingResponse(AdminListingBase):
     id: UUID
     category: Literal["stay"]
     destination: DestinationRef | None = None
-    media: list[AdminListingMediaResponse] = Field(default_factory=list)
+    media: list[AdminListingMediaResponse] = Field(default_factory=list, exclude=True)
+    cover_image: MediaSummary | None = None
+    gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
     hotel_detail: AdminHotelDetail | None = Field(default=None, alias="hotelDetail")
 
 
@@ -232,7 +235,9 @@ class TourListingResponse(AdminListingBase):
     id: UUID
     category: Literal["tour"]
     destination: DestinationRef | None = None
-    media: list[AdminListingMediaResponse] = Field(default_factory=list)
+    media: list[AdminListingMediaResponse] = Field(default_factory=list, exclude=True)
+    cover_image: MediaSummary | None = None
+    gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
     tour_detail: AdminTourDetail | None = Field(default=None, alias="tourDetail")
 
 
@@ -244,7 +249,9 @@ class ActivityListingResponse(AdminListingBase):
     id: UUID
     category: Literal["activity"]
     destination: DestinationRef | None = None
-    media: list[AdminListingMediaResponse] = Field(default_factory=list)
+    media: list[AdminListingMediaResponse] = Field(default_factory=list, exclude=True)
+    cover_image: MediaSummary | None = None
+    gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
     safari_detail: AdminSafariDetail | None = Field(default=None, alias="safariDetail")
 
 
@@ -256,7 +263,9 @@ class TransferListingResponse(AdminListingBase):
     id: UUID
     category: Literal["transfer"]
     destination: DestinationRef | None = None
-    media: list[AdminListingMediaResponse] = Field(default_factory=list)
+    media: list[AdminListingMediaResponse] = Field(default_factory=list, exclude=True)
+    cover_image: MediaSummary | None = None
+    gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
     transfer_detail: AdminTransferDetail | None = Field(default=None, alias="transferDetail")
 
 

@@ -13,4 +13,5 @@ httpx
 passlib[bcrypt]
 python-jose
 cloudinary
+python-multipart
 python-dotenv

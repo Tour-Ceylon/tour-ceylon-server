@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models.listing import Listing
 from app.repositories.listing_repo import ListingRepository
@@ -24,10 +24,12 @@ class AdminDashboardListingRepository:
             .options(
                 joinedload(Listing.destination),
                 joinedload(Listing.media),
+                joinedload(Listing.cover_media),
                 joinedload(Listing.hotel_detail),
                 joinedload(Listing.tour_detail),
                 joinedload(Listing.safari_detail),
                 joinedload(Listing.transfer_detail),
+                selectinload(Listing.media_assets),
             )
             .order_by(Listing.created_at.desc())
             .all()

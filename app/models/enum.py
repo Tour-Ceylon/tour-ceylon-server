@@ -113,6 +113,16 @@ class MediaType(str, Enum):
     VIDEO = "video"
 
 
+class MediaOwnerType(str, Enum):
+    LISTING = "LISTING"
+    PACKAGE = "PACKAGE"
+
+
+class MediaAssetStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    DELETED = "DELETED"
+
+
 class DestinationType(str, Enum):
     COUNTRY = "country"
     PROVINCE = "province"

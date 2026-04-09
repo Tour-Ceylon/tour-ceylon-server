@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models.admin_dashboard import Package, PackageAddOn
 
@@ -20,22 +20,34 @@ class AdminPackageRepository:
         return package
 
     def get_all(self) -> list[Package]:
-        return self.db.query(Package).order_by(Package.created_at.desc()).all()
+        return (
+            self.db.query(Package)
+            .options(joinedload(Package.cover_media), selectinload(Package.media_assets))
+            .order_by(Package.created_at.desc())
+            .all()
+        )
 
     def get_all_active(self) -> list[Package]:
         return (
             self.db.query(Package)
+            .options(joinedload(Package.cover_media), selectinload(Package.media_assets))
             .filter(Package.is_active.is_(True))
             .order_by(Package.created_at.desc())
             .all()
         )
 
     def get(self, package_id: UUID) -> Package | None:
-        return self.db.query(Package).filter(Package.id == package_id).first()
+        return (
+            self.db.query(Package)
+            .options(joinedload(Package.cover_media), selectinload(Package.media_assets))
+            .filter(Package.id == package_id)
+            .first()
+        )
 
     def get_active(self, package_id: UUID) -> Package | None:
         return (
             self.db.query(Package)
+            .options(joinedload(Package.cover_media), selectinload(Package.media_assets))
             .filter(Package.id == package_id, Package.is_active.is_(True))
             .first()
         )
@@ -68,3 +80,8 @@ class AdminPackageRepository:
 
     def _to_uuid(self, value: UUID | str) -> UUID:
         return value if isinstance(value, UUID) else UUID(value)
+
+    def update_cover_media(self, package: Package, media_id: UUID | None) -> Package:
+        package.cover_media_id = media_id
+        self.db.flush()
+        return package

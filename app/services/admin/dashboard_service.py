@@ -247,7 +247,6 @@ class AdminDashboardService:
             "longitude": payload.get("longitude"),
             "is_active": payload.get("is_active"),
             "base_currency": payload.get("base_currency", CurrencyCode.LKR),
-            "media": self._normalize_media_payload(payload.get("media")) if "media" in payload else ([] if not partial else None),
         }
 
         detail_key = self._detail_key_for_category(category)
@@ -357,17 +356,8 @@ class AdminDashboardService:
             "is_active": listing.is_active,
             "latitude": listing.latitude,
             "longitude": listing.longitude,
-            "media": [
-                {
-                    "id": media.id,
-                    "url": media.url,
-                    "alt_text": media.alt_text,
-                    "sort_order": media.sort_order,
-                    "is_cover": media.is_cover,
-                    "media_type": media.media_type,
-                }
-                for media in listing.media
-            ],
+            "cover_image": listing.cover_image,
+            "gallery": listing.gallery,
             "destination": {
                 "id": listing.destination.id,
                 "name": listing.destination.name,

@@ -1,11 +1,13 @@
 from datetime import datetime, timezone
 import uuid
 
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, and_
 from sqlalchemy.dialects.postgresql import JSON, UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import foreign, relationship
 
-from app.config.database import Base
+from app.models.base import Base
+from app.models.enum import MediaOwnerType
+from app.models.media import MediaAsset
 
 
 class Package(Base):
@@ -17,11 +19,12 @@ class Package(Base):
     duration = Column(Integer, nullable=False)
     route = Column(String, nullable=False)
     base_price = Column(Float, nullable=False)
-    image = Column(String, nullable=False)
+    image = Column(String, nullable=True)
     category = Column(String, nullable=False)
     includes = Column(JSON, nullable=False, default=list)
     itinerary = Column(JSON, nullable=False, default=list)
     is_active = Column(Boolean, nullable=False, default=True)
+    cover_media_id = Column(UUID(as_uuid=True), ForeignKey("media_assets.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
@@ -30,6 +33,53 @@ class Package(Base):
         nullable=False,
     )
     add_ons = relationship("PackageAddOn", back_populates="package", cascade="all, delete-orphan")
+    media_assets = relationship(
+        "MediaAsset",
+        primaryjoin=lambda: and_(
+            foreign(MediaAsset.owner_id) == Package.id,
+            MediaAsset.owner_type == MediaOwnerType.PACKAGE,
+        ),
+        order_by=lambda: (MediaAsset.sort_order, MediaAsset.created_at),
+        viewonly=True,
+    )
+    cover_media = relationship("MediaAsset", foreign_keys=[cover_media_id], uselist=False)
+
+    @property
+    def ordered_media_assets(self) -> list[MediaAsset]:
+        return sorted(
+            list(self.media_assets or []),
+            key=lambda media: (media.sort_order, media.created_at),
+        )
+
+    @property
+    def cover_image(self) -> dict | None:
+        media = self.cover_media or next(
+            (item for item in self.ordered_media_assets if item.is_primary),
+            None,
+        )
+        if media is None:
+            return None
+        return {
+            "id": media.id,
+            "url": media.secure_url,
+            "alt_text": media.alt_text,
+        }
+
+    @property
+    def gallery(self) -> list[dict]:
+        return [
+            {
+                "id": media.id,
+                "url": media.secure_url,
+                "alt_text": media.alt_text,
+                "sort_order": media.sort_order,
+                "is_primary": media.is_primary,
+                "width": media.width,
+                "height": media.height,
+                "format": media.format,
+            }
+            for media in self.ordered_media_assets
+        ]
 
 
 class AddOn(Base):

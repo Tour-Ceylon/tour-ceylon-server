@@ -1,6 +1,8 @@
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.schemas.media_schema import MediaAssetPublicResponse, MediaSummary
 
 
 class PackageItineraryItem(BaseModel):
@@ -15,7 +17,7 @@ class PackageBase(BaseModel):
     duration: int
     route: str
     basePrice: float
-    image: str
+    image: str | None = None
     category: str
     includes: list[str]
     itinerary: list[PackageItineraryItem]
@@ -43,6 +45,8 @@ class PackageUpdate(BaseModel):
 
 class PackageResponse(PackageBase):
     id: UUID
+    image: str | None = Field(default=None, exclude=True)
+    cover_image: MediaSummary | None = None
+    gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
-

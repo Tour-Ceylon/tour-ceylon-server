@@ -34,12 +34,13 @@ def build_package_response(package) -> dict:
         "duration": package.duration,
         "route": package.route,
         "basePrice": package.base_price,
-        "image": package.image,
         "category": category,
         "includes": package.includes or [],
         "itinerary": package.itinerary or [],
         "addOns": add_on_values,
         "isActive": package.is_active,
+        "cover_image": package.cover_image,
+        "gallery": package.gallery,
     }
 
 

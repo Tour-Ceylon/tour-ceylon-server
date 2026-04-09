@@ -2,7 +2,7 @@ from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import and_, func
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models.destination import Destination
 from app.models.enum import CurrencyCode, ListingType
@@ -46,10 +46,12 @@ class ListingRepository:
         return self.db.query(Listing).options(
             joinedload(Listing.destination),
             joinedload(Listing.media),
+            joinedload(Listing.cover_media),
             joinedload(Listing.hotel_detail),
             joinedload(Listing.tour_detail),
             joinedload(Listing.safari_detail),
             joinedload(Listing.transfer_detail),
+            selectinload(Listing.media_assets),
         )
 
     def create(self, listing_data: ListingCreate) -> Listing:
@@ -276,18 +278,12 @@ class ListingRepository:
             self.db.delete(existing_detail)
 
     def _sync_media(self, listing: Listing, media_payload: list[dict] | None) -> None:
-        if media_payload is None:
-            return
+        return
 
-        for existing_media in list(listing.media):
-            self.db.delete(existing_media)
-
+    def update_cover_media(self, listing: Listing, media_id: UUID | None) -> Listing:
+        listing.cover_media_id = media_id
         self.db.flush()
-
-        for media_item in media_payload:
-            media = ListingMedia(listing_id=listing.id, **media_item)
-            self.db.add(media)
-            listing.media.append(media)
+        return listing
 
 
 def get_listing_repository(db: Session = None) -> ListingRepository:
