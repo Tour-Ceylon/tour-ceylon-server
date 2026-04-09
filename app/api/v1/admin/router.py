@@ -1,8 +1,10 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.models.user import User
+from app.api.deps import require_admin
 from app.api.v1.admin import addons, destinations, listings, packages, reset, settings, snapshot
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_admin)])
 router.include_router(snapshot.router)
 router.include_router(packages.router)
 router.include_router(addons.router)

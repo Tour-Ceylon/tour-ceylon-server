@@ -36,6 +36,11 @@ class UserRepository:
         """Get user by email"""
         return self.db.query(User).filter(User.email == email).first()
     
+    def make_admin(self, user: User) -> User:
+        """Make a user an admin"""
+        update_data = UserUpdate(role=UserRole.ADMIN)
+        return self.update(user.id, update_data)
+    
     def get_all(
         self, 
         skip: int = 0, 
