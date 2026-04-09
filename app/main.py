@@ -34,4 +34,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+settings = get_settings()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.on_event("startup")
+def on_startup() -> None:
+    try:
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database tables initialized")
+    except Exception:
+        logger.exception("Failed to initialize database tables during startup")
+        raise
+
+
 app.include_router(api_router, prefix="/api/v1")
