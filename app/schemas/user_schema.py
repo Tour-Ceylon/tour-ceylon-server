@@ -8,6 +8,7 @@ from app.models.enum import UserRole
 
 class UserBase(BaseModel):
     """Base user schema with common fields"""
+    clerk_user_id: Optional[str] = None
     email: EmailStr
     full_name: Optional[str] = None
     country: Optional[str] = None

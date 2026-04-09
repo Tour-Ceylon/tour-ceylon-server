@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 import math
 
+from app.api.deps import get_current_user
 from app.config.database import get_db
 from app.repositories.user_repo import UserRepository
 from app.schemas.user_schema import (
@@ -14,6 +15,7 @@ from app.schemas.user_schema import (
     UserSearchParams
 )
 from app.models.enum import UserRole
+from app.models.user import User
 
 router = APIRouter()
 
@@ -45,6 +47,24 @@ async def create_user(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create user"
         )
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_me(
+    current_user: User = Depends(get_current_user),
+):
+    """Get the authenticated local user resolved from Clerk auth."""
+
+    return current_user
+
+
+@router.post("/sync", response_model=UserResponse)
+async def sync_user(
+    current_user: User = Depends(get_current_user),
+):
+    """Idempotently resolve or auto-provision the authenticated user."""
+
+    return current_user
 
 
 @router.get("/{user_id}", response_model=UserResponse)

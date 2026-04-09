@@ -17,6 +17,7 @@ class UserRepository:
     def create(self, user_data: UserCreate) -> User:
         """Create a new user"""
         db_user = User(
+            clerk_user_id=user_data.clerk_user_id,
             email=user_data.email,
             full_name=user_data.full_name,
             country=user_data.country,
@@ -35,6 +36,10 @@ class UserRepository:
     def get_by_email(self, email: str) -> Optional[User]:
         """Get user by email"""
         return self.db.query(User).filter(User.email == email).first()
+
+    def get_by_clerk_user_id(self, clerk_user_id: str) -> Optional[User]:
+        """Get user by Clerk user ID"""
+        return self.db.query(User).filter(User.clerk_user_id == clerk_user_id).first()
     
     def get_all(
         self, 
