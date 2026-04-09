@@ -34,5 +34,20 @@ class ListingVariant(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         cascade="all, delete-orphan",
     )
 
+    @property
+    def pricing(self) -> dict | None:
+        pricing_rules = sorted(
+            list(self.pricing_rules or []),
+            key=lambda rule: (rule.priority, rule.created_at, rule.id),
+        )
+        if not pricing_rules:
+            return None
+        pricing_rule = pricing_rules[0]
+        return {
+            "amount": pricing_rule.amount,
+            "currency": pricing_rule.currency,
+            "priority": pricing_rule.priority,
+        }
+
 
 Listing_Variant = ListingVariant

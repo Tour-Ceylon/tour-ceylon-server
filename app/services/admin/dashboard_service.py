@@ -252,10 +252,27 @@ class AdminDashboardService:
         detail_key = self._detail_key_for_category(category)
         if detail_key in payload and payload[detail_key] is not None:
             model_data[detail_key] = self._normalize_detail_payload(detail_key, payload[detail_key])
+        if "variants" in payload and payload["variants"] is not None:
+            model_data["variants"] = [self._normalize_variant_payload(variant) for variant in payload["variants"]]
 
         if partial:
             return {key: value for key, value in model_data.items() if value is not None}
         return model_data
+
+    def _normalize_variant_payload(self, variant_payload: dict) -> dict:
+        pricing_payload = variant_payload["pricing"]
+        return {
+            "name": variant_payload["name"].strip(),
+            "booking_unit": variant_payload["booking_unit"],
+            "capacity_min": variant_payload.get("capacity_min"),
+            "capacity_max": variant_payload.get("capacity_max"),
+            "is_default": variant_payload.get("is_default", False),
+            "pricing": {
+                "amount": pricing_payload["amount"],
+                "currency": pricing_payload["currency"],
+                "priority": pricing_payload["priority"],
+            },
+        }
 
     def _normalize_detail_payload(self, detail_key: str, detail_payload: dict) -> dict:
         normalized = dict(detail_payload)
@@ -358,6 +375,7 @@ class AdminDashboardService:
             "longitude": listing.longitude,
             "cover_image": listing.cover_image,
             "gallery": listing.gallery,
+            "variants": [self._build_listing_variant_response(variant) for variant in getattr(listing, "variants", []) or []],
             "destination": {
                 "id": listing.destination.id,
                 "name": listing.destination.name,
@@ -373,6 +391,23 @@ class AdminDashboardService:
             "transfer_detail": self._build_transfer_detail(listing),
         }
         return {key: value for key, value in payload.items() if value is not None}
+
+    def _build_listing_variant_response(self, variant) -> dict:
+        pricing_rules = list(getattr(variant, "pricing_rules", []) or [])
+        pricing_rule = sorted(pricing_rules, key=lambda rule: (rule.priority, rule.created_at, rule.id))[0]
+        return {
+            "id": variant.id,
+            "name": variant.name,
+            "booking_unit": getattr(variant.booking_unit, "value", variant.booking_unit),
+            "capacity_min": variant.capacity_min,
+            "capacity_max": variant.capacity_max,
+            "is_default": variant.is_default,
+            "pricing": {
+                "amount": pricing_rule.amount,
+                "currency": getattr(pricing_rule.currency, "value", pricing_rule.currency),
+                "priority": pricing_rule.priority,
+            },
+        }
 
     def _build_hotel_detail(self, listing: Listing) -> dict | None:
         detail = listing.hotel_detail

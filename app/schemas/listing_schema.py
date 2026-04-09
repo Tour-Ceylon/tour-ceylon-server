@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.enum import (
+    BookingUnit,
     CurrencyCode,
     DestinationType,
     ListingStatus,
@@ -329,6 +330,24 @@ class ListingMediaResponse(ListingMediaBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ListingVariantPricingResponse(BaseModel):
+    amount: float
+    currency: CurrencyCode
+    priority: int
+
+
+class ListingVariantResponse(BaseModel):
+    id: UUID
+    name: str
+    booking_unit: BookingUnit
+    capacity_min: int | None = None
+    capacity_max: int | None = None
+    is_default: bool
+    pricing: ListingVariantPricingResponse | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ListingBase(CoordinateMixin):
     listing_type: ListingType
     destination_id: UUID
@@ -436,6 +455,7 @@ class ListingResponse(BaseModel):
     tour_detail: TourDetailResponse | None = None
     safari_detail: SafariDetailResponse | None = None
     transfer_detail: TransferDetailResponse | None = None
+    variants: list[ListingVariantResponse] = Field(default_factory=list)
     cover_image: MediaSummary | None = None
     gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
     created_at: datetime
