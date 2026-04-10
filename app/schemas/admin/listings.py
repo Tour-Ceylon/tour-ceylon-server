@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.models.enum import DestinationType, MediaType, PropertyType, SafariType, TransferLocationType
+from app.models.enum import BookingUnit, CurrencyCode, DestinationType, MediaType, PropertyType, SafariType, TransferLocationType
 from app.schemas.media_schema import MediaAssetPublicResponse, MediaSummary
 
 
@@ -197,12 +197,46 @@ class AdminListingMediaResponse(AdminListingMedia):
     id: UUID
 
 
+class ListingVariantPriceInput(BaseModel):
+    amount: float = Field(ge=0)
+    currency: CurrencyCode
+    priority: int = Field(ge=0)
+
+    model_config = ConfigDict(use_enum_values=True)
+
+
+class ListingVariantAdminInput(BaseModel):
+    name: str = Field(min_length=1)
+    booking_unit: BookingUnit = Field(alias="bookingUnit")
+    capacity_min: int | None = Field(default=None, alias="capacityMin", ge=0)
+    capacity_max: int | None = Field(default=None, alias="capacityMax", ge=0)
+    is_default: bool = Field(default=False, alias="isDefault")
+    pricing: ListingVariantPriceInput
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    @model_validator(mode="after")
+    def validate_capacity_range(self):
+        if (
+            self.capacity_min is not None
+            and self.capacity_max is not None
+            and self.capacity_min > self.capacity_max
+        ):
+            raise ValueError("capacityMin cannot be greater than capacityMax")
+        return self
+
+
+class ListingVariantAdminResponse(ListingVariantAdminInput):
+    id: UUID
+
+
 class AdminListingBase(CoordinateMixin):
     destination_id: UUID = Field(alias="destinationId")
     title: str
     description: str | None = None
     is_active: bool = Field(default=True, alias="isActive")
     media: list[AdminListingMedia] = Field(default_factory=list)
+    variants: list[ListingVariantAdminInput] = Field(default_factory=list)
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
@@ -216,6 +250,14 @@ class AdminListingBase(CoordinateMixin):
 class StayListingCreate(AdminListingBase):
     hotel_detail: AdminHotelDetail = Field(alias="hotelDetail")
 
+    @model_validator(mode="after")
+    def validate_variants(self):
+        if not self.variants:
+            raise ValueError("at least one variant is required")
+        if sum(1 for variant in self.variants if variant.is_default) != 1:
+            raise ValueError("exactly one variant must be marked as default")
+        return self
+
 
 class StayListingResponse(AdminListingBase):
     id: UUID
@@ -224,11 +266,20 @@ class StayListingResponse(AdminListingBase):
     media: list[AdminListingMediaResponse] = Field(default_factory=list, exclude=True)
     cover_image: MediaSummary | None = None
     gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
+    variants: list[ListingVariantAdminResponse] = Field(default_factory=list)
     hotel_detail: AdminHotelDetail | None = Field(default=None, alias="hotelDetail")
 
 
 class TourListingCreate(AdminListingBase):
     tour_detail: AdminTourDetail = Field(alias="tourDetail")
+
+    @model_validator(mode="after")
+    def validate_variants(self):
+        if not self.variants:
+            raise ValueError("at least one variant is required")
+        if sum(1 for variant in self.variants if variant.is_default) != 1:
+            raise ValueError("exactly one variant must be marked as default")
+        return self
 
 
 class TourListingResponse(AdminListingBase):
@@ -238,11 +289,20 @@ class TourListingResponse(AdminListingBase):
     media: list[AdminListingMediaResponse] = Field(default_factory=list, exclude=True)
     cover_image: MediaSummary | None = None
     gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
+    variants: list[ListingVariantAdminResponse] = Field(default_factory=list)
     tour_detail: AdminTourDetail | None = Field(default=None, alias="tourDetail")
 
 
 class ActivityListingCreate(AdminListingBase):
     safari_detail: AdminSafariDetail = Field(alias="safariDetail")
+
+    @model_validator(mode="after")
+    def validate_variants(self):
+        if not self.variants:
+            raise ValueError("at least one variant is required")
+        if sum(1 for variant in self.variants if variant.is_default) != 1:
+            raise ValueError("exactly one variant must be marked as default")
+        return self
 
 
 class ActivityListingResponse(AdminListingBase):
@@ -252,11 +312,20 @@ class ActivityListingResponse(AdminListingBase):
     media: list[AdminListingMediaResponse] = Field(default_factory=list, exclude=True)
     cover_image: MediaSummary | None = None
     gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
+    variants: list[ListingVariantAdminResponse] = Field(default_factory=list)
     safari_detail: AdminSafariDetail | None = Field(default=None, alias="safariDetail")
 
 
 class TransferListingCreate(AdminListingBase):
     transfer_detail: AdminTransferDetail = Field(alias="transferDetail")
+
+    @model_validator(mode="after")
+    def validate_variants(self):
+        if not self.variants:
+            raise ValueError("at least one variant is required")
+        if sum(1 for variant in self.variants if variant.is_default) != 1:
+            raise ValueError("exactly one variant must be marked as default")
+        return self
 
 
 class TransferListingResponse(AdminListingBase):
@@ -266,6 +335,7 @@ class TransferListingResponse(AdminListingBase):
     media: list[AdminListingMediaResponse] = Field(default_factory=list, exclude=True)
     cover_image: MediaSummary | None = None
     gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
+    variants: list[ListingVariantAdminResponse] = Field(default_factory=list)
     transfer_detail: AdminTransferDetail | None = Field(default=None, alias="transferDetail")
 
 
@@ -279,6 +349,7 @@ class ListingUpdateRequest(CoordinateMixin):
     safari_detail: AdminSafariDetail | None = Field(default=None, alias="safariDetail")
     transfer_detail: AdminTransferDetail | None = Field(default=None, alias="transferDetail")
     media: list[AdminListingMedia] | None = None
+    variants: list[ListingVariantAdminInput] | None = None
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
@@ -302,4 +373,14 @@ class ListingUpdateRequest(CoordinateMixin):
     def validate_media_cover(self):
         if self.media is not None and sum(1 for media in self.media if media.is_cover) > 1:
             raise ValueError("only one media item can be marked as cover")
+        return self
+
+    @model_validator(mode="after")
+    def validate_variants(self):
+        if self.variants is None:
+            return self
+        if not self.variants:
+            raise ValueError("at least one variant is required")
+        if sum(1 for variant in self.variants if variant.is_default) != 1:
+            raise ValueError("exactly one variant must be marked as default")
         return self

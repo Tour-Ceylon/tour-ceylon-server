@@ -9,6 +9,7 @@ from app.models.enum import CurrencyCode, ListingType
 from app.models.hotelDetail import HotelDetail
 from app.models.listing import Listing
 from app.models.listingMedia import ListingMedia
+from app.models.listingVariant import ListingVariant
 from app.models.safariDetail import SafariDetail
 from app.models.tourDetail import TourDetail
 from app.models.transferDetail import TransferDetail
@@ -52,6 +53,7 @@ class ListingRepository:
             joinedload(Listing.safari_detail),
             joinedload(Listing.transfer_detail),
             selectinload(Listing.media_assets),
+            selectinload(Listing.variants).selectinload(ListingVariant.pricing_rules),
         )
 
     def create(self, listing_data: ListingCreate) -> Listing:
