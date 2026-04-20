@@ -116,3 +116,54 @@ class Listing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
             }
             for media in self.ordered_media_assets
         ]
+
+    @property
+    def priced_variants(self) -> list:
+        variants = list(self.variants or [])
+        return [
+            variant
+            for variant in sorted(
+                variants,
+                key=lambda item: (
+                    not item.is_default,
+                    (item.pricing or {}).get("amount", float("inf")),
+                    item.name.lower(),
+                ),
+            )
+            if item.pricing is not None
+        ]
+
+    @property
+    def default_variant(self):
+        variants = list(self.variants or [])
+        default = next((variant for variant in variants if variant.is_default), None)
+        if default and default.pricing is not None:
+            return default
+        priced_variants = self.priced_variants
+        return priced_variants[0] if priced_variants else None
+
+    @property
+    def from_price(self) -> dict | None:
+        priced_variants = [
+            variant for variant in list(self.variants or []) if variant.pricing is not None
+        ]
+        if not priced_variants:
+            return None
+
+        cheapest_variant = min(
+            priced_variants,
+            key=lambda item: (
+                item.pricing["amount"],
+                item.pricing["priority"],
+                not item.is_default,
+                item.name.lower(),
+            ),
+        )
+        return {
+            "amount": cheapest_variant.pricing["amount"],
+            "currency": cheapest_variant.pricing["currency"],
+            "priority": cheapest_variant.pricing["priority"],
+            "variant_id": cheapest_variant.id,
+            "variant_name": cheapest_variant.name,
+            "booking_unit": cheapest_variant.booking_unit,
+        }

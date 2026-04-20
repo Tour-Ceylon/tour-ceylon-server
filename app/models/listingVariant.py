@@ -12,7 +12,7 @@ class ListingVariant(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     listing_id = Column(UUID(as_uuid=True), ForeignKey("listings.id"), nullable=False, index=True)
 
 
-    name = Column(String, unique=True, nullable=False, index=True)
+    name = Column(String, nullable=False, index=True)
 
     booking_unit = Column(
         Enum(BookingUnit, name="booking_unit_enum"),

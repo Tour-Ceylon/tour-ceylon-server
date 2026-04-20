@@ -336,6 +336,29 @@ class ListingVariantPricingResponse(BaseModel):
     priority: int
 
 
+class ListingVariantPricingInput(ListingVariantPricingResponse):
+    pass
+
+
+class ListingVariantCreate(BaseModel):
+    name: str
+    booking_unit: BookingUnit
+    capacity_min: int | None = None
+    capacity_max: int | None = None
+    is_default: bool = False
+    pricing: ListingVariantPricingInput
+
+    @model_validator(mode="after")
+    def validate_capacity_range(self):
+        if (
+            self.capacity_min is not None
+            and self.capacity_max is not None
+            and self.capacity_min > self.capacity_max
+        ):
+            raise ValueError("capacity_min cannot be greater than capacity_max")
+        return self
+
+
 class ListingVariantResponse(BaseModel):
     id: UUID
     name: str
@@ -361,6 +384,7 @@ class ListingBase(CoordinateMixin):
     tour_detail: TourDetailBase | None = None
     safari_detail: SafariDetailBase | None = None
     transfer_detail: TransferDetailBase | None = None
+    variants: list[ListingVariantCreate] = Field(default_factory=list)
     media: list[ListingMediaCreate] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -390,6 +414,17 @@ class ListingBase(CoordinateMixin):
         return self
 
     @model_validator(mode="after")
+    def validate_variants(self):
+        if self.listing_type == ListingType.HOTEL:
+            if not self.variants:
+                raise ValueError("hotel listings require at least one variant")
+            if any(variant.booking_unit != BookingUnit.PER_ROOM for variant in self.variants):
+                raise ValueError("hotel variants must use per_room booking")
+        if self.variants and sum(1 for variant in self.variants if variant.is_default) != 1:
+            raise ValueError("exactly one variant must be marked as default")
+        return self
+
+    @model_validator(mode="after")
     def validate_media_cover(self):
         if sum(1 for media in self.media if media.is_cover) > 1:
             raise ValueError("only one media item can be marked as cover")
@@ -413,6 +448,7 @@ class ListingUpdate(CoordinateMixin):
     tour_detail: TourDetailUpdate | None = None
     safari_detail: SafariDetailUpdate | None = None
     transfer_detail: TransferDetailUpdate | None = None
+    variants: list[ListingVariantCreate] | None = None
     media: list[ListingMediaCreate] | None = None
 
     @model_validator(mode="after")
@@ -432,10 +468,26 @@ class ListingUpdate(CoordinateMixin):
         return self
 
     @model_validator(mode="after")
+    def validate_variants(self):
+        if self.variants is None:
+            return self
+        if not self.variants:
+            raise ValueError("at least one variant is required")
+        if sum(1 for variant in self.variants if variant.is_default) != 1:
+            raise ValueError("exactly one variant must be marked as default")
+        return self
+
+    @model_validator(mode="after")
     def validate_media_cover(self):
         if self.media is not None and sum(1 for media in self.media if media.is_cover) > 1:
             raise ValueError("only one media item can be marked as cover")
         return self
+
+
+class ListingFromPriceResponse(ListingVariantPricingResponse):
+    variant_id: UUID
+    variant_name: str
+    booking_unit: BookingUnit
 
 
 class ListingResponse(BaseModel):
@@ -456,6 +508,7 @@ class ListingResponse(BaseModel):
     safari_detail: SafariDetailResponse | None = None
     transfer_detail: TransferDetailResponse | None = None
     variants: list[ListingVariantResponse] = Field(default_factory=list)
+    from_price: ListingFromPriceResponse | None = None
     cover_image: MediaSummary | None = None
     gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
     created_at: datetime
