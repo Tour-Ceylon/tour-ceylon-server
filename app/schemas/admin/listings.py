@@ -226,8 +226,24 @@ class ListingVariantAdminInput(BaseModel):
         return self
 
 
-class ListingVariantAdminResponse(ListingVariantAdminInput):
+class ListingVariantAdminResponse(BaseModel):
     id: UUID
+    name: str
+    booking_unit: BookingUnit = Field(alias="bookingUnit")
+    capacity_min: int | None = Field(default=None, alias="capacityMin")
+    capacity_max: int | None = Field(default=None, alias="capacityMax")
+    is_default: bool = Field(default=False, alias="isDefault")
+    pricing: ListingVariantPriceInput | None = None
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+
+class ListingFromPriceResponse(ListingVariantPriceInput):
+    variant_id: UUID = Field(alias="variantId")
+    variant_name: str = Field(alias="variantName")
+    booking_unit: BookingUnit = Field(alias="bookingUnit")
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
 
 class AdminListingBase(CoordinateMixin):
@@ -264,6 +280,7 @@ class StayListingResponse(AdminListingBase):
     category: Literal["stay"]
     destination: DestinationRef | None = None
     media: list[AdminListingMediaResponse] = Field(default_factory=list, exclude=True)
+    from_price: ListingFromPriceResponse | None = Field(default=None, alias="fromPrice")
     cover_image: MediaSummary | None = None
     gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
     variants: list[ListingVariantAdminResponse] = Field(default_factory=list)
@@ -287,6 +304,7 @@ class TourListingResponse(AdminListingBase):
     category: Literal["tour"]
     destination: DestinationRef | None = None
     media: list[AdminListingMediaResponse] = Field(default_factory=list, exclude=True)
+    from_price: ListingFromPriceResponse | None = Field(default=None, alias="fromPrice")
     cover_image: MediaSummary | None = None
     gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
     variants: list[ListingVariantAdminResponse] = Field(default_factory=list)
@@ -310,6 +328,7 @@ class ActivityListingResponse(AdminListingBase):
     category: Literal["activity"]
     destination: DestinationRef | None = None
     media: list[AdminListingMediaResponse] = Field(default_factory=list, exclude=True)
+    from_price: ListingFromPriceResponse | None = Field(default=None, alias="fromPrice")
     cover_image: MediaSummary | None = None
     gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
     variants: list[ListingVariantAdminResponse] = Field(default_factory=list)
@@ -333,6 +352,7 @@ class TransferListingResponse(AdminListingBase):
     category: Literal["transfer"]
     destination: DestinationRef | None = None
     media: list[AdminListingMediaResponse] = Field(default_factory=list, exclude=True)
+    from_price: ListingFromPriceResponse | None = Field(default=None, alias="fromPrice")
     cover_image: MediaSummary | None = None
     gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
     variants: list[ListingVariantAdminResponse] = Field(default_factory=list)

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.errors import AdminAPIError
 from app.models.destination import Destination
-from app.models.enum import CurrencyCode, ListingType
+from app.models.enum import BookingUnit, CurrencyCode, ListingType
 from app.models.listing import Listing
 from app.repositories.admin.addon_repo import AdminAddonRepository
 from app.repositories.admin.destination_repo import AdminDestinationRepository
@@ -253,23 +253,32 @@ class AdminDashboardService:
         if detail_key in payload and payload[detail_key] is not None:
             model_data[detail_key] = self._normalize_detail_payload(detail_key, payload[detail_key])
         if "variants" in payload and payload["variants"] is not None:
-            model_data["variants"] = [self._normalize_variant_payload(variant) for variant in payload["variants"]]
+            model_data["variants"] = [
+                self._normalize_variant_payload(category, variant, model_data["base_currency"])
+                for variant in payload["variants"]
+            ]
 
         if partial:
             return {key: value for key, value in model_data.items() if value is not None}
         return model_data
 
-    def _normalize_variant_payload(self, variant_payload: dict) -> dict:
+    def _normalize_variant_payload(self, category: str, variant_payload: dict, base_currency: CurrencyCode) -> dict:
         pricing_payload = variant_payload["pricing"]
+        booking_unit = variant_payload["booking_unit"]
+        if category == "stay" and booking_unit != BookingUnit.PER_ROOM:
+            raise AdminAPIError(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                message="Hotel variants must use per_room booking_unit",
+            )
         return {
             "name": variant_payload["name"].strip(),
-            "booking_unit": variant_payload["booking_unit"],
+            "booking_unit": booking_unit,
             "capacity_min": variant_payload.get("capacity_min"),
             "capacity_max": variant_payload.get("capacity_max"),
             "is_default": variant_payload.get("is_default", False),
             "pricing": {
                 "amount": pricing_payload["amount"],
-                "currency": pricing_payload["currency"],
+                "currency": pricing_payload.get("currency", base_currency),
                 "priority": pricing_payload["priority"],
             },
         }
@@ -373,6 +382,7 @@ class AdminDashboardService:
             "is_active": listing.is_active,
             "latitude": listing.latitude,
             "longitude": listing.longitude,
+            "from_price": listing.from_price,
             "cover_image": listing.cover_image,
             "gallery": listing.gallery,
             "variants": [self._build_listing_variant_response(variant) for variant in getattr(listing, "variants", []) or []],
@@ -394,7 +404,11 @@ class AdminDashboardService:
 
     def _build_listing_variant_response(self, variant) -> dict:
         pricing_rules = list(getattr(variant, "pricing_rules", []) or [])
-        pricing_rule = sorted(pricing_rules, key=lambda rule: (rule.priority, rule.created_at, rule.id))[0]
+        pricing_rule = (
+            sorted(pricing_rules, key=lambda rule: (rule.priority, rule.created_at, rule.id))[0]
+            if pricing_rules
+            else None
+        )
         return {
             "id": variant.id,
             "name": variant.name,
@@ -402,11 +416,15 @@ class AdminDashboardService:
             "capacity_min": variant.capacity_min,
             "capacity_max": variant.capacity_max,
             "is_default": variant.is_default,
-            "pricing": {
-                "amount": pricing_rule.amount,
-                "currency": getattr(pricing_rule.currency, "value", pricing_rule.currency),
-                "priority": pricing_rule.priority,
-            },
+            "pricing": (
+                {
+                    "amount": pricing_rule.amount,
+                    "currency": getattr(pricing_rule.currency, "value", pricing_rule.currency),
+                    "priority": pricing_rule.priority,
+                }
+                if pricing_rule is not None
+                else None
+            ),
         }
 
     def _build_hotel_detail(self, listing: Listing) -> dict | None:

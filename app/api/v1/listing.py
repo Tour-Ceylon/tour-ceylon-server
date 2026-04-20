@@ -40,6 +40,11 @@ async def create_listing(
     try:
         listing = listing_repo.create(listing_data)
         return listing
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -72,6 +77,22 @@ async def get_listings(
         per_page=limit,
         total_pages=math.ceil(total / limit) if total > 0 else 0
     )
+
+
+@router.get("/id/{listing_id}", response_model=ListingResponse)
+async def get_listing(
+    listing_id: UUID,
+    listing_repo: ListingRepository = Depends(get_listing_repository),
+):
+    """Get listing by ID"""
+
+    listing = listing_repo.get_by_id(listing_id)
+    if not listing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Listing not found"
+        )
+    return listing
 
 
 @router.post("/search", response_model=ListingListResponse)
@@ -120,6 +141,11 @@ async def update_listing(
     try:
         updated_listing = listing_repo.update(listing_id, listing_data)
         return updated_listing
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

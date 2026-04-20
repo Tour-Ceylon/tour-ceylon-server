@@ -5,11 +5,12 @@ from sqlalchemy import and_, func
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models.destination import Destination
-from app.models.enum import CurrencyCode, ListingType
+from app.models.enum import BookingUnit, CurrencyCode, ListingType, PricingRuleType
 from app.models.hotelDetail import HotelDetail
 from app.models.listing import Listing
 from app.models.listingMedia import ListingMedia
 from app.models.listingVariant import ListingVariant
+from app.models.pricingRule import PricingRule
 from app.models.safariDetail import SafariDetail
 from app.models.tourDetail import TourDetail
 from app.models.transferDetail import TransferDetail
@@ -39,6 +40,7 @@ class ListingRepository:
         "is_active",
     }
     MEDIA_FIELD = "media"
+    VARIANTS_FIELD = "variants"
 
     def __init__(self, db: Session):
         self.db = db
@@ -64,6 +66,8 @@ class ListingRepository:
         self.db.flush()
 
         self._sync_detail(db_listing, db_listing.listing_type, payload)
+        self._validate_variant_payload(db_listing.listing_type, payload.get(self.VARIANTS_FIELD))
+        self._replace_variants(db_listing, payload.get(self.VARIANTS_FIELD))
         self._sync_media(db_listing, payload.get(self.MEDIA_FIELD))
 
         self.db.commit()
@@ -128,6 +132,7 @@ class ListingRepository:
         detail_data = {key: value for key, value in update_data.items() if key in self.DETAIL_FIELDS}
         base_update_data = {key: value for key, value in update_data.items() if key in self.BASE_FIELDS}
         media_data = update_data.get(self.MEDIA_FIELD) if self.MEDIA_FIELD in update_data else None
+        variants_data = update_data.get(self.VARIANTS_FIELD) if self.VARIANTS_FIELD in update_data else None
 
         previous_type = db_listing.listing_type
         for field, value in base_update_data.items():
@@ -139,6 +144,10 @@ class ListingRepository:
 
         if detail_data or previous_type != active_type:
             self._sync_detail(db_listing, active_type, update_data)
+
+        if self.VARIANTS_FIELD in update_data:
+            self._validate_variant_payload(active_type, variants_data)
+            self._replace_variants(db_listing, variants_data)
 
         if self.MEDIA_FIELD in update_data:
             self._sync_media(db_listing, media_data)
@@ -281,6 +290,44 @@ class ListingRepository:
 
     def _sync_media(self, listing: Listing, media_payload: list[dict] | None) -> None:
         return
+
+    def _replace_variants(self, listing: Listing, variants_payload: list[dict] | None) -> None:
+        if variants_payload is None:
+            return
+
+        for existing_variant in list(listing.variants or []):
+            self.db.delete(existing_variant)
+        self.db.flush()
+
+        for variant_payload in variants_payload:
+            pricing_payload = variant_payload["pricing"]
+            variant = ListingVariant(
+                listing_id=listing.id,
+                name=variant_payload["name"],
+                booking_unit=variant_payload["booking_unit"],
+                capacity_min=variant_payload.get("capacity_min"),
+                capacity_max=variant_payload.get("capacity_max"),
+                is_default=variant_payload.get("is_default", False),
+            )
+            self.db.add(variant)
+            self.db.flush()
+
+            variant.pricing_rules.append(
+                PricingRule(
+                    amount=pricing_payload["amount"],
+                    currency=pricing_payload["currency"],
+                    priority=pricing_payload["priority"],
+                    pricing_rule_type=PricingRuleType.FIXED,
+                    min_guest=variant_payload.get("capacity_min") or 1,
+                    max_guest=variant_payload.get("capacity_max") or 999999,
+                )
+            )
+
+    def _validate_variant_payload(self, listing_type: ListingType, variants_payload: list[dict] | None) -> None:
+        if listing_type != ListingType.HOTEL or variants_payload is None:
+            return
+        if any(variant["booking_unit"] != BookingUnit.PER_ROOM for variant in variants_payload):
+            raise ValueError("hotel listing variants must use per_room booking")
 
     def update_cover_media(self, listing: Listing, media_id: UUID | None) -> Listing:
         listing.cover_media_id = media_id
