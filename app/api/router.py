@@ -2,11 +2,16 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     admin,
+    auth,
     packages,
     users,
     listing,
     bookings,
     wishlist,
+    guest_reviews,
+    review_metrics,
+    rooms,
+    includes,
 )
 
 api_router = APIRouter()
@@ -15,6 +20,12 @@ api_router.include_router(
     admin.router,
     prefix="/admin",
     tags=["admin"]
+)
+
+api_router.include_router(
+    auth.router,
+    prefix="/auth",
+    tags=["auth"]
 )
 
 api_router.include_router(
@@ -46,4 +57,28 @@ api_router.include_router(
     wishlist.router,
     prefix="/wishlist",
     tags=["wishlist"]
+)
+
+api_router.include_router(
+    guest_reviews.router,
+    prefix="/guest-reviews",
+    tags=["guest-reviews"]
+)
+
+api_router.include_router(
+    review_metrics.router,
+    prefix="/review-metrics",
+    tags=["review-metrics"]
+)
+
+api_router.include_router(
+    rooms.router,
+    prefix="/rooms",
+    tags=["rooms"]
+)
+
+api_router.include_router(
+    includes.router,
+    prefix="/listing-addons",
+    tags=["listing-addons"]
 )

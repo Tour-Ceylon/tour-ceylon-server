@@ -238,25 +238,41 @@ def _resolve_local_user(db: Session, claims: dict) -> User:
     subject = claims.get("sub")
     full_name = claims.get("name")
 
-    if not email and subject:
-        clerk_user = _fetch_clerk_user(subject)
-        if clerk_user:
-            email = _extract_clerk_email(clerk_user)
-            full_name = full_name or _extract_clerk_name(clerk_user)
-            logger.info(
-                "auth.user_lookup_enriched_from_clerk sub=%s email_found=%s",
-                subject,
-                bool(email),
-            )
+    if not subject:
+        logger.warning("auth.token_missing_subject")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication token is missing the required subject claim",
+        )
 
-    user = None
-    if subject:
-        user = db.query(User).filter(User.clerk_user_id == subject).first()
+    sync_action = "unchanged"
+
+    clerk_user = _fetch_clerk_user(subject)
+    if clerk_user:
+        # Prefer Clerk's current primary email to keep local profile in sync.
+        clerk_email = _extract_clerk_email(clerk_user)
+        if clerk_email:
+            email = clerk_email
+
+        full_name = full_name or _extract_clerk_name(clerk_user)
+        logger.info(
+            "auth.user_lookup_enriched_from_clerk sub=%s email_found=%s",
+            subject,
+            bool(email),
+        )
+    elif not email and not os.getenv("CLERK_SECRET_KEY"):
+        logger.error("auth.clerk_secret_missing_for_profile_enrichment sub=%s", subject)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Server auth configuration is incomplete. Set CLERK_SECRET_KEY.",
+        )
+
+    user = db.query(User).filter(User.clerk_user_id == subject).first()
 
     if email:
         user = user or db.query(User).filter(User.email == email).first()
 
-    if user is None and subject:
+    if user is None:
         try:
             subject_as_uuid = UUID(subject)
             user = db.query(User).filter(User.id == subject_as_uuid).first()
@@ -267,10 +283,27 @@ def _resolve_local_user(db: Session, claims: dict) -> User:
     if user is not None and subject and user.clerk_user_id != subject:
         user.clerk_user_id = subject
         did_update_user = True
+        sync_action = "updated"
+
+    if user is not None and email and user.email != email:
+        existing_email_owner = db.query(User).filter(User.email == email, User.id != user.id).first()
+        if existing_email_owner:
+            sync_action = "conflict"
+            logger.warning(
+                "auth.email_sync_conflict clerk_user_id=%s email=%s existing_user_id=%s",
+                subject,
+                email,
+                existing_email_owner.id,
+            )
+        else:
+            user.email = email
+            did_update_user = True
+            sync_action = "updated"
 
     if user is not None and full_name and user.full_name != full_name:
         user.full_name = full_name
         did_update_user = True
+        sync_action = "updated"
 
     if did_update_user:
         db.add(user)
@@ -282,6 +315,7 @@ def _resolve_local_user(db: Session, claims: dict) -> User:
         db.add(user)
         db.commit()
         db.refresh(user)
+        sync_action = "created"
         logger.info(
             "auth.user_auto_provisioned clerk_user_id=%s email=%s user_id=%s",
             subject,
@@ -296,7 +330,13 @@ def _resolve_local_user(db: Session, claims: dict) -> User:
             detail="Authenticated user is not linked to a local user record",
         )
 
-    logger.info("auth.user_resolved user_id=%s email=%s", user.id, user.email)
+    logger.info(
+        "auth.user_sync_result action=%s user_id=%s clerk_user_id=%s email=%s",
+        sync_action,
+        user.id,
+        user.clerk_user_id,
+        user.email,
+    )
     return user
 
 
