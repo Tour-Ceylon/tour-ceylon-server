@@ -67,6 +67,12 @@ class Listing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    activity_detail = relationship(
+        "ActivityDetail",
+        back_populates="listing",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
     tour_detail = relationship(
         "TourDetail",
         back_populates="listing",

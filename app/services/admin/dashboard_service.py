@@ -17,11 +17,12 @@ from app.services.package_service import build_package_response
 
 
 class AdminDashboardService:
-    VALID_LISTING_CATEGORIES = {"stay", "tour", "activity", "transfer"}
+    VALID_LISTING_CATEGORIES = {"stay", "tour", "safari", "experience", "transfer"}
     LISTING_TYPE_MAP = {
         "stay": ListingType.HOTEL,
         "tour": ListingType.TOUR,
-        "activity": ListingType.SAFARI,
+        "safari": ListingType.SAFARI,
+        "experience": ListingType.EXPERIENCE,
         "transfer": ListingType.TRANSFER,
     }
     CATEGORY_BY_LISTING_TYPE = {value: key for key, value in LISTING_TYPE_MAP.items()}
@@ -35,7 +36,7 @@ class AdminDashboardService:
         self.listings = AdminDashboardListingRepository(db)
 
     def get_snapshot(self) -> dict:
-        listing_groups = {"stay": [], "tour": [], "activity": [], "transfer": []}
+        listing_groups = {"stay": [], "tour": [], "safari": [], "experience": [], "transfer": []}
         for listing in self.listings.get_all_listings():
             category = self.CATEGORY_BY_LISTING_TYPE.get(listing.listing_type)
             if category in listing_groups:
@@ -311,6 +312,16 @@ class AdminDashboardService:
                 normalized["start_time"] = self._parse_time(normalized["start_time"])
             if normalized.get("end_time") is not None:
                 normalized["end_time"] = self._parse_time(normalized["end_time"])
+        elif detail_key == "activity_detail":
+            normalized["included_items"] = list(normalized.get("included_items") or [])
+            normalized["excluded_items"] = list(normalized.get("excluded_items") or [])
+            normalized["languages"] = list(normalized.get("languages") or [])
+            normalized["what_to_bring"] = list(normalized.get("what_to_bring") or [])
+            normalized["highlights"] = list(normalized.get("highlights") or [])
+            if normalized.get("start_time") is not None:
+                normalized["start_time"] = self._parse_time(normalized["start_time"])
+            if normalized.get("end_time") is not None:
+                normalized["end_time"] = self._parse_time(normalized["end_time"])
         elif detail_key == "transfer_detail":
             normalized["vehicle_types"] = list(normalized.get("vehicle_types") or [])
             normalized["included_items"] = list(normalized.get("included_items") or [])
@@ -353,7 +364,8 @@ class AdminDashboardService:
         return {
             "stay": "hotel_detail",
             "tour": "tour_detail",
-            "activity": "safari_detail",
+            "safari": "safari_detail",
+            "experience": "activity_detail",
             "transfer": "transfer_detail",
         }[category]
 
@@ -398,6 +410,7 @@ class AdminDashboardService:
             "hotel_detail": self._build_hotel_detail(listing),
             "tour_detail": self._build_tour_detail(listing),
             "safari_detail": self._build_safari_detail(listing),
+            "activity_detail": self._build_activity_detail(listing),
             "transfer_detail": self._build_transfer_detail(listing),
         }
         return {key: value for key, value in payload.items() if value is not None}
@@ -543,6 +556,33 @@ class AdminDashboardService:
             "excluded_items": detail.excluded_items or [],
             "cancellation_policy": detail.cancellation_policy,
             "waiting_time_policy": detail.waiting_time_policy,
+        }
+
+    def _build_activity_detail(self, listing: Listing) -> dict | None:
+        detail = listing.activity_detail
+        if detail is None:
+            return None
+        return {
+            "activity_type": detail.activity_type,
+            "duration_minutes": detail.duration_minutes,
+            "meeting_point": detail.meeting_point,
+            "start_time": detail.start_time.isoformat() if detail.start_time else None,
+            "end_time": detail.end_time.isoformat() if detail.end_time else None,
+            "included_items": detail.included_items or [],
+            "excluded_items": detail.excluded_items or [],
+            "languages": detail.languages or [],
+            "difficulty_level": detail.difficulty_level,
+            "age_restriction": detail.age_restriction,
+            "private_available": detail.private_available,
+            "group_size_min": detail.group_size_min,
+            "group_size_max": detail.group_size_max,
+            "pickup_supported": detail.pickup_supported,
+            "pickup_notes": detail.pickup_notes,
+            "what_to_bring": detail.what_to_bring or [],
+            "cancellation_policy": detail.cancellation_policy,
+            "accessibility_info": detail.accessibility_info,
+            "highlights": detail.highlights or [],
+            "availability_notes": detail.availability_notes,
         }
 
     def _not_found(self, message: str) -> AdminAPIError:

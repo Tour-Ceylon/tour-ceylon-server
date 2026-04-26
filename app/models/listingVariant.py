@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Enum, Integer, Boolean, UUID, ForeignKey
+from sqlalchemy import Column, String, Enum, Integer, Boolean, UUID, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.models.base import Base, UUIDMixin, TimestampMixin, SoftDeleteMixin
@@ -7,11 +7,11 @@ from app.models.enum import BookingUnit
 
 class ListingVariant(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "listing_variants"
-
+    __table_args__ = (
+        UniqueConstraint("listing_id", "name", name="uq_listing_variants_listing_id_name"),
+    )
 
     listing_id = Column(UUID(as_uuid=True), ForeignKey("listings.id"), nullable=False, index=True)
-
-
     name = Column(String, nullable=False, index=True)
 
     booking_unit = Column(
@@ -19,7 +19,6 @@ class ListingVariant(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         nullable=False
     )
 
-    
     capacity_min = Column(Integer, nullable=True)
     capacity_max = Column(Integer, nullable=True)
 
@@ -48,6 +47,3 @@ class ListingVariant(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
             "currency": pricing_rule.currency,
             "priority": pricing_rule.priority,
         }
-
-
-Listing_Variant = ListingVariant

@@ -1,9 +1,11 @@
 from app.schemas.admin.addons import AddOnCreate, AddOnResponse
 from app.schemas.admin.destinations import AdminDestinationOption
 from app.schemas.admin.listings import (
-    ActivityListingCreate,
-    ActivityListingResponse,
+    ExperienceListingCreate,
+    ExperienceListingResponse,
     ListingUpdateRequest,
+    SafariListingCreate,
+    SafariListingResponse,
     StayListingCreate,
     StayListingResponse,
     TourListingCreate,
