@@ -1,3 +1,4 @@
+from app.models.activityDetail import ActivityDetail
 from app.models.availabilityCalendar import AvailabilityCalendar
 from app.models.admin_dashboard import AddOn, AdminSettings, Package, PackageAddOn
 from app.models.booking import Booking, Bookings
@@ -21,6 +22,7 @@ from app.models.user import User
 from app.models.wishlist import Wishlist
 
 __all__ = [
+    "ActivityDetail",
     "AvailabilityCalendar",
     "AddOn",
     "AdminSettings",
