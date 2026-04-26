@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy import and_, func
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from app.models.activityDetail import ActivityDetail
 from app.models.destination import Destination
 from app.models.enum import BookingUnit, CurrencyCode, ListingType, PricingRuleType
 from app.models.hotelDetail import HotelDetail
@@ -25,8 +26,9 @@ class ListingRepository:
         ListingType.TOUR: ("tour_detail", TourDetail),
         ListingType.SAFARI: ("safari_detail", SafariDetail),
         ListingType.TRANSFER: ("transfer_detail", TransferDetail),
+        ListingType.EXPERIENCE: ("activity_detail", ActivityDetail),
     }
-    DETAIL_FIELDS = {"hotel_detail", "tour_detail", "safari_detail", "transfer_detail"}
+    DETAIL_FIELDS = {"hotel_detail", "tour_detail", "safari_detail", "transfer_detail", "activity_detail"}
     BASE_FIELDS = {
         "listing_type",
         "destination_id",
@@ -54,6 +56,7 @@ class ListingRepository:
             joinedload(Listing.tour_detail),
             joinedload(Listing.safari_detail),
             joinedload(Listing.transfer_detail),
+            joinedload(Listing.activity_detail),
             selectinload(Listing.media_assets),
             selectinload(Listing.variants).selectinload(ListingVariant.pricing_rules),
         )

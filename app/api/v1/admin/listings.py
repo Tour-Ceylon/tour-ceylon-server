@@ -6,8 +6,10 @@ from app.api.errors import AdminAPIError
 from app.api.v1.admin.dependencies import get_admin_service, get_media_service
 from app.models.enum import ListingType, MediaOwnerType
 from app.schemas.admin.listings import (
-    ActivityListingCreate,
-    ActivityListingResponse,
+    SafariListingCreate,
+    SafariListingResponse,
+    ExperienceListingCreate,
+    ExperienceListingResponse,
     ListingUpdateRequest,
     AdminListingCategory,
     StayListingCreate,
@@ -26,14 +28,16 @@ router = APIRouter(prefix="/listings", tags=["admin-listings"])
 AdminListingResponse = (
     StayListingResponse
     | TourListingResponse
-    | ActivityListingResponse
+    | SafariListingResponse
+    | ExperienceListingResponse
     | TransferListingResponse
 )
 
 LISTING_TYPE_MAP = {
     "stay": ListingType.HOTEL,
     "tour": ListingType.TOUR,
-    "activity": ListingType.SAFARI,
+    "safari": ListingType.SAFARI,
+    "experience": ListingType.EXPERIENCE,
     "transfer": ListingType.TRANSFER,
 }
 
@@ -72,16 +76,29 @@ async def create_tour_listing(
 
 
 @router.post(
-    "/activity",
-    response_model=ActivityListingResponse,
+    "/safari",
+    response_model=SafariListingResponse,
     response_model_by_alias=True,
     status_code=status.HTTP_201_CREATED,
 )
-async def create_activity_listing(
-    payload: ActivityListingCreate,
+async def create_safari_listing(
+    payload: SafariListingCreate,
     service: AdminDashboardService = Depends(get_admin_service),
 ):
-    return service.create_listing("activity", payload.model_dump(by_alias=False))
+    return service.create_listing("safari", payload.model_dump(by_alias=False))
+
+
+@router.post(
+    "/experience",
+    response_model=ExperienceListingResponse,
+    response_model_by_alias=True,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_experience_listing(
+    payload: ExperienceListingCreate,
+    service: AdminDashboardService = Depends(get_admin_service),
+):
+    return service.create_listing("experience", payload.model_dump(by_alias=False))
 
 
 @router.post(

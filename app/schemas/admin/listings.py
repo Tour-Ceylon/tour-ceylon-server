@@ -7,7 +7,7 @@ from app.models.enum import BookingUnit, CurrencyCode, DestinationType, MediaTyp
 from app.schemas.media_schema import MediaAssetPublicResponse, MediaSummary
 
 
-AdminListingCategory = Literal["stay", "tour", "activity", "transfer"]
+AdminListingCategory = Literal["stay", "tour", "safari", "experience", "transfer"]
 
 
 class CoordinateMixin(BaseModel):
@@ -311,7 +311,46 @@ class TourListingResponse(AdminListingBase):
     tour_detail: AdminTourDetail | None = Field(default=None, alias="tourDetail")
 
 
-class ActivityListingCreate(AdminListingBase):
+class AdminActivityDetail(BaseModel):
+    activity_type: str = Field(alias="activityType")
+    duration_minutes: int = Field(alias="durationMinutes")
+    meeting_point: str | None = Field(default=None, alias="meetingPoint")
+    start_time: str | None = Field(default=None, alias="startTime")
+    end_time: str | None = Field(default=None, alias="endTime")
+    included_items: list[str] = Field(default_factory=list, alias="includedItems")
+    excluded_items: list[str] = Field(default_factory=list, alias="excludedItems")
+    languages: list[str] = Field(default_factory=list)
+    difficulty_level: str | None = Field(default=None, alias="difficultyLevel")
+    age_restriction: str | None = Field(default=None, alias="ageRestriction")
+    private_available: bool | None = Field(default=None, alias="privateAvailable")
+    group_size_min: int | None = Field(default=None, alias="groupSizeMin")
+    group_size_max: int | None = Field(default=None, alias="groupSizeMax")
+    pickup_supported: bool | None = Field(default=None, alias="pickupSupported")
+    pickup_notes: str | None = Field(default=None, alias="pickupNotes")
+    what_to_bring: list[str] = Field(default_factory=list, alias="whatToBring")
+    cancellation_policy: str | None = Field(default=None, alias="cancellationPolicy")
+    accessibility_info: str | None = Field(default=None, alias="accessibilityInfo")
+    highlights: list[str] = Field(default_factory=list)
+    availability_notes: str | None = Field(default=None, alias="availabilityNotes")
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    @field_validator(
+        "included_items",
+        "excluded_items", 
+        "languages",
+        "what_to_bring",
+        "highlights",
+        mode="before",
+    )
+    @classmethod
+    def default_empty_lists(cls, value):
+        if value is None:
+            return []
+        return value
+
+
+class SafariListingCreate(AdminListingBase):
     safari_detail: AdminSafariDetail = Field(alias="safariDetail")
 
     @model_validator(mode="after")
@@ -323,9 +362,9 @@ class ActivityListingCreate(AdminListingBase):
         return self
 
 
-class ActivityListingResponse(AdminListingBase):
+class SafariListingResponse(AdminListingBase):
     id: UUID
-    category: Literal["activity"]
+    category: Literal["safari"]
     destination: DestinationRef | None = None
     media: list[AdminListingMediaResponse] = Field(default_factory=list, exclude=True)
     from_price: ListingFromPriceResponse | None = Field(default=None, alias="fromPrice")
@@ -333,6 +372,30 @@ class ActivityListingResponse(AdminListingBase):
     gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
     variants: list[ListingVariantAdminResponse] = Field(default_factory=list)
     safari_detail: AdminSafariDetail | None = Field(default=None, alias="safariDetail")
+
+
+class ExperienceListingCreate(AdminListingBase):
+    activity_detail: AdminActivityDetail = Field(alias="activityDetail")
+
+    @model_validator(mode="after")
+    def validate_variants(self):
+        if not self.variants:
+            raise ValueError("at least one variant is required")
+        if sum(1 for variant in self.variants if variant.is_default) != 1:
+            raise ValueError("exactly one variant must be marked as default")
+        return self
+
+
+class ExperienceListingResponse(AdminListingBase):
+    id: UUID
+    category: Literal["experience"]
+    destination: DestinationRef | None = None
+    media: list[AdminListingMediaResponse] = Field(default_factory=list, exclude=True)
+    from_price: ListingFromPriceResponse | None = Field(default=None, alias="fromPrice")
+    cover_image: MediaSummary | None = None
+    gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
+    variants: list[ListingVariantAdminResponse] = Field(default_factory=list)
+    activity_detail: AdminActivityDetail | None = Field(default=None, alias="activityDetail")
 
 
 class TransferListingCreate(AdminListingBase):
@@ -367,6 +430,7 @@ class ListingUpdateRequest(CoordinateMixin):
     hotel_detail: AdminHotelDetail | None = Field(default=None, alias="hotelDetail")
     tour_detail: AdminTourDetail | None = Field(default=None, alias="tourDetail")
     safari_detail: AdminSafariDetail | None = Field(default=None, alias="safariDetail")
+    activity_detail: AdminActivityDetail | None = Field(default=None, alias="activityDetail")
     transfer_detail: AdminTransferDetail | None = Field(default=None, alias="transferDetail")
     media: list[AdminListingMedia] | None = None
     variants: list[ListingVariantAdminInput] | None = None
@@ -381,6 +445,7 @@ class ListingUpdateRequest(CoordinateMixin):
                 self.hotel_detail,
                 self.tour_detail,
                 self.safari_detail,
+                self.activity_detail,
                 self.transfer_detail,
             ]
             if detail is not None
