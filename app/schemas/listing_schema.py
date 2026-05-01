@@ -253,6 +253,72 @@ class SafariDetailResponse(SafariDetailBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ActivityDetailBase(BaseModel):
+    activity_type: str
+    duration_minutes: int
+    meeting_point: str | None = None
+    start_time: time | None = None
+    end_time: time | None = None
+    included_items: list[str] = Field(default_factory=list)
+    excluded_items: list[str] = Field(default_factory=list)
+    languages: list[str] = Field(default_factory=list)
+    difficulty_level: str | None = None
+    age_restriction: str | None = None
+    private_available: bool | None = None
+    group_size_min: int | None = None
+    group_size_max: int | None = None
+    pickup_supported: bool | None = None
+    pickup_notes: str | None = None
+    what_to_bring: list[str] = Field(default_factory=list)
+    cancellation_policy: str | None = None
+    accessibility_info: str | None = None
+    highlights: list[str] = Field(default_factory=list)
+    availability_notes: str | None = None
+
+    @field_validator(
+        "included_items",
+        "excluded_items", 
+        "languages",
+        "what_to_bring",
+        "highlights",
+        mode="before",
+    )
+    @classmethod
+    def default_empty_lists(cls, value):
+        if value is None:
+            return []
+        return value
+
+
+class ActivityDetailUpdate(BaseModel):
+    activity_type: str | None = None
+    duration_minutes: int | None = None
+    meeting_point: str | None = None
+    start_time: time | None = None
+    end_time: time | None = None
+    included_items: list[str] | None = None
+    excluded_items: list[str] | None = None
+    languages: list[str] | None = None
+    difficulty_level: str | None = None
+    age_restriction: str | None = None
+    private_available: bool | None = None
+    group_size_min: int | None = None
+    group_size_max: int | None = None
+    pickup_supported: bool | None = None
+    pickup_notes: str | None = None
+    what_to_bring: list[str] | None = None
+    cancellation_policy: str | None = None
+    accessibility_info: str | None = None
+    highlights: list[str] | None = None
+    availability_notes: str | None = None
+
+
+class ActivityDetailResponse(ActivityDetailBase):
+    id: UUID
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class TransferDetailBase(BaseModel):
     origin_type: TransferLocationType
     destination_type: DestinationType
@@ -383,28 +449,33 @@ class ListingBase(CoordinateMixin):
     hotel_detail: HotelDetailBase | None = None
     tour_detail: TourDetailBase | None = None
     safari_detail: SafariDetailBase | None = None
+    activity_detail: ActivityDetailBase | None = None
     transfer_detail: TransferDetailBase | None = None
     variants: list[ListingVariantCreate] = Field(default_factory=list)
     media: list[ListingMediaCreate] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_matching_detail(self):
+        # Each listing type requires its specific detail
         detail_fields = {
             ListingType.HOTEL: self.hotel_detail,
             ListingType.TOUR: self.tour_detail,
             ListingType.SAFARI: self.safari_detail,
+            ListingType.EXPERIENCE: self.activity_detail,
             ListingType.TRANSFER: self.transfer_detail,
         }
-        expected_detail = detail_fields[self.listing_type]
+        expected_detail = detail_fields.get(self.listing_type)
         if expected_detail is None:
             raise ValueError(f"{self.listing_type.value} listings require the matching detail payload")
 
+        # Ensure only one detail payload is provided
         mismatched = [
             name
             for name, detail in {
                 "hotel_detail": self.hotel_detail,
                 "tour_detail": self.tour_detail,
                 "safari_detail": self.safari_detail,
+                "activity_detail": self.activity_detail,
                 "transfer_detail": self.transfer_detail,
             }.items()
             if detail is not None
@@ -447,6 +518,7 @@ class ListingUpdate(CoordinateMixin):
     hotel_detail: HotelDetailUpdate | None = None
     tour_detail: TourDetailUpdate | None = None
     safari_detail: SafariDetailUpdate | None = None
+    activity_detail: ActivityDetailUpdate | None = None
     transfer_detail: TransferDetailUpdate | None = None
     variants: list[ListingVariantCreate] | None = None
     media: list[ListingMediaCreate] | None = None
@@ -459,6 +531,7 @@ class ListingUpdate(CoordinateMixin):
                 "hotel_detail": self.hotel_detail,
                 "tour_detail": self.tour_detail,
                 "safari_detail": self.safari_detail,
+                "activity_detail": self.activity_detail,
                 "transfer_detail": self.transfer_detail,
             }.items()
             if detail is not None
@@ -506,6 +579,7 @@ class ListingResponse(BaseModel):
     hotel_detail: HotelDetailResponse | None = None
     tour_detail: TourDetailResponse | None = None
     safari_detail: SafariDetailResponse | None = None
+    activity_detail: ActivityDetailResponse | None = None
     transfer_detail: TransferDetailResponse | None = None
     variants: list[ListingVariantResponse] = Field(default_factory=list)
     from_price: ListingFromPriceResponse | None = None

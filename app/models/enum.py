@@ -12,6 +12,7 @@ class ListingType(str, Enum):
     TOUR = "tour"
     TRANSFER = "transfer"
     SAFARI = "safari"
+    EXPERIENCE = "experience"
     HOTEL = "hotel"
 
 
