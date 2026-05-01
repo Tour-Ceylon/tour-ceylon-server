@@ -7,6 +7,7 @@ from app.api.v1 import (
     users,
     listing,
     bookings,
+    booking_inquiries,
     wishlist,
     guest_reviews,
     review_metrics,
@@ -51,6 +52,12 @@ api_router.include_router(
     bookings.router,
     prefix="/bookings",
     tags=["bookings"]
+)
+
+api_router.include_router(
+    booking_inquiries.router,
+    prefix="/booking-inquiries",
+    tags=["booking-inquiries"]
 )
 
 api_router.include_router(

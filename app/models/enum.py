@@ -161,4 +161,12 @@ class PropertyType(str, Enum):
     BOUTIQUE_HOTEL = "boutique_hotel"
 
 
+class InquiryStatus(str, Enum):
+    PENDING_CONTACT = "pending_contact"
+    CONTACTED = "contacted"
+    QUOTED = "quoted"
+    CONVERTED_TO_BOOKING = "converted_to_booking"
+    CANCELLED = "cancelled"
+
+
 PropertType = PropertyType

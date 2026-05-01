@@ -2,6 +2,7 @@ from app.models.activityDetail import ActivityDetail
 from app.models.availabilityCalendar import AvailabilityCalendar
 from app.models.admin_dashboard import AddOn, AdminSettings, Package, PackageAddOn
 from app.models.booking import Booking, Bookings
+from app.models.bookingInquiry import BookingInquiry, BookingInquiries
 from app.models.bookingItem import BookingItem
 from app.models.bookingStatusHistory import BookingStatusHistory
 from app.models.bookingTraveler import BookingTraveler
@@ -28,6 +29,8 @@ __all__ = [
     "AdminSettings",
     "Booking",
     "Bookings",
+    "BookingInquiry",
+    "BookingInquiries",
     "BookingItem",
     "BookingStatusHistory",
     "BookingTraveler",
