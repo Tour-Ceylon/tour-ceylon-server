@@ -83,6 +83,7 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: Optional[str] = None
 
     EMAIL_FROM: Optional[str] = None
+    INQUIRY_EMAIL: Optional[str] = None  # Email address for booking inquiries
 
     # ---------------------------------------------------
     # FILE STORAGE (Cloudinary or future)
