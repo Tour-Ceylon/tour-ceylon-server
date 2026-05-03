@@ -49,6 +49,10 @@ class MediaPrimaryUpdateRequest(BaseModel):
     is_primary: bool = True
 
 
+class MediaAltTextUpdateRequest(BaseModel):
+    alt_text: str
+
+
 class MediaReorderItem(BaseModel):
     id: UUID
     sort_order: int
