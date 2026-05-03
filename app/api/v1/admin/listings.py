@@ -19,7 +19,7 @@ from app.schemas.admin.listings import (
     TransferListingCreate,
     TransferListingResponse,
 )
-from app.schemas.media_schema import MediaAssetListResponse, MediaPrimaryUpdateRequest, MediaReorderRequest, MediaUploadResponse
+from app.schemas.media_schema import MediaAltTextUpdateRequest, MediaAssetListResponse, MediaPrimaryUpdateRequest, MediaReorderRequest, MediaUploadResponse
 from app.services.admin.dashboard_service import AdminDashboardService
 from app.services.media_service import MediaService
 
@@ -188,6 +188,21 @@ async def set_listing_primary_media(
     if not payload.is_primary:
         raise AdminAPIError(status_code=status.HTTP_400_BAD_REQUEST, message="is_primary must be true")
     return service.set_primary(MediaOwnerType.LISTING, listing_id, media_id)
+
+
+@router.patch(
+    "/{category}/{listing_id}/media/{media_id}/alt-text",
+    response_model=MediaAssetListResponse,
+)
+async def update_listing_media_alt_text(
+    category: AdminListingCategory,
+    listing_id: UUID,
+    media_id: UUID,
+    payload: MediaAltTextUpdateRequest,
+    service: MediaService = Depends(get_media_service),
+):
+    _ensure_category_matches_listing(service, category, listing_id)
+    return service.update_alt_text(MediaOwnerType.LISTING, listing_id, media_id, payload.alt_text)
 
 
 @router.patch(

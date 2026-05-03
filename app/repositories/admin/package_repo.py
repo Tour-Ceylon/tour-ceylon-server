@@ -1,15 +1,34 @@
 from uuid import UUID
-
 from sqlalchemy.orm import Session, joinedload, selectinload
-
 from app.models.admin_dashboard import Package, PackageAddOn
-
 
 class AdminPackageRepository:
     def __init__(self, db: Session):
         self.db = db
 
+    def _normalize_data(self, data: any) -> any:
+        """Deeply normalizes dict keys to camelCase for consistent DB storage."""
+        if isinstance(data, list):
+            return [self._normalize_data(x) for x in data]
+        if isinstance(data, dict):
+            new_dict = {}
+            for k, v in data.items():
+                if isinstance(k, str):
+                    # Convert snake_case to camelCase
+                    components = k.split("_")
+                    new_key = components[0] + "".join(x.title() for x in components[1:])
+                    new_dict[new_key] = self._normalize_data(v)
+                else:
+                    new_dict[k] = self._normalize_data(v)
+            return new_dict
+        return data
+
     def create(self, package_data: dict) -> Package:
+        # Normalize JSON fields to camelCase before saving
+        for field in ["quick_facts", "destinations", "itinerary", "structured_itinerary", "listing_refs", "highlights", "exclusions"]:
+            if field in package_data and package_data[field] is not None:
+                package_data[field] = self._normalize_data(package_data[field])
+
         add_on_ids = package_data.pop("add_ons", []) or []
         package = Package(**package_data)
         self.db.add(package)
@@ -53,9 +72,14 @@ class AdminPackageRepository:
         )
 
     def update(self, package: Package, updates: dict) -> Package:
+        # Normalize JSON fields to camelCase before saving
+        for field in ["quick_facts", "destinations", "itinerary", "structured_itinerary", "listing_refs", "highlights", "exclusions"]:
+            if field in updates and updates[field] is not None:
+                updates[field] = self._normalize_data(updates[field])
+
         add_on_ids = updates.pop("add_ons", None)
-        for field, value in updates.items():
-            setattr(package, field, value)
+        for key, value in updates.items():
+            setattr(package, key, value)
 
         if add_on_ids is not None:
             package.add_ons.clear()

@@ -195,14 +195,25 @@ class AdminDashboardService:
     def _package_model_data(self, payload: dict, partial: bool = False) -> dict:
         field_map = {
             "name": "name",
+            "summary": "summary",
             "description": "description",
             "duration": "duration",
+            "nights": "nights",
             "route": "route",
+            "startLocation": "start_location",
+            "endLocation": "end_location",
+            "tripStyle": "trip_style",
             "basePrice": "base_price",
             "image": "image",
             "category": "category",
             "includes": "includes",
+            "exclusions": "exclusions",
+            "highlights": "highlights",
+            "quickFacts": "quick_facts",
+            "destinations": "destinations",
             "itinerary": "itinerary",
+            "structuredItinerary": "structured_itinerary",
+            "listingRefs": "listing_refs",
             "addOns": "add_ons",
             "isActive": "is_active",
         }
@@ -216,7 +227,36 @@ class AdminDashboardService:
             if source_key == "category" and value is not None:
                 value = self._normalize_package_category(value)
             data[target_key] = value
+
+        # Auto-generate simple itinerary if structured exists but simple doesn't
+        if data.get("structured_itinerary"):
+            if not data.get("itinerary"):
+                data["itinerary"] = self._derive_simple_itinerary(data["structured_itinerary"])
+
         return data
+
+    def _derive_simple_itinerary(self, structured_items: list[dict]) -> list[dict]:
+        results = []
+        for day in structured_items or []:
+            overview = (day.get("overview") or "").strip()
+            if overview:
+                description = overview
+            else:
+                parts = []
+                for block in day.get("blocks", []) or []:
+                    title = (block.get("title") or "").strip()
+                    desc = (block.get("description") or "").strip()
+                    if title and desc:
+                        parts.append(f"{title}: {desc}")
+                    elif title:
+                        parts.append(title)
+                description = " ".join(parts).strip()
+            results.append({
+                "day": int(day.get("day") or 0),
+                "title": day.get("title") or f"Day {day.get('day')}",
+                "description": description,
+            })
+        return [item for item in results if item["day"] > 0]
 
     def _normalize_package_category(self, category: str) -> str:
         return category.strip().replace("-", "_").upper()
