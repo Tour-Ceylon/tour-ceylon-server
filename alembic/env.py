@@ -5,9 +5,12 @@ from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
+from dotenv import load_dotenv
 
 from app.models.base import Base
 import app.models  # noqa: F401
+
+load_dotenv()
 
 config = context.config
 

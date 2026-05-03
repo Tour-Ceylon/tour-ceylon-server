@@ -89,6 +89,18 @@ class MediaService:
         refreshed_owner = self._get_owner(owner_type, owner_id)
         return self._build_owner_response(refreshed_owner)
 
+    def update_alt_text(self, owner_type: MediaOwnerType, owner_id: UUID, media_id: UUID, alt_text: str) -> dict:
+        self._get_owner(owner_type, owner_id)
+        media = self._get_owner_media_or_404(owner_type, owner_id, media_id)
+        try:
+            media.alt_text = alt_text.strip()
+            self.db.commit()
+        except SQLAlchemyError as exc:
+            self.db.rollback()
+            raise AdminAPIError(status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to update alt text") from exc
+        refreshed_owner = self._get_owner(owner_type, owner_id)
+        return self._build_owner_response(refreshed_owner)
+
     def reorder(self, owner_type: MediaOwnerType, owner_id: UUID, reorder_items) -> dict:
         owner = self._get_owner(owner_type, owner_id)
         media_items = self.media_repo.list_by_owner(owner_type, owner_id)

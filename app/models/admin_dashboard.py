@@ -24,6 +24,20 @@ class Package(Base):
     includes = Column(JSON, nullable=False, default=list)
     itinerary = Column(JSON, nullable=False, default=list)
     is_active = Column(Boolean, nullable=False, default=True)
+
+    # Structured Fields
+    summary = Column(Text, nullable=True)
+    nights = Column(Integer, nullable=True)
+    trip_style = Column(String, nullable=True)
+    start_location = Column(String, nullable=True)
+    end_location = Column(String, nullable=True)
+    destinations = Column(JSON, nullable=False, default=list)
+    highlights = Column(JSON, nullable=False, default=list)
+    exclusions = Column(JSON, nullable=False, default=list)
+    quick_facts = Column(JSON, nullable=False, default=dict)
+    structured_itinerary = Column(JSON, nullable=False, default=list)
+    listing_refs = Column(JSON, nullable=False, default=list)
+
     cover_media_id = Column(UUID(as_uuid=True), ForeignKey("media_assets.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(
@@ -32,6 +46,7 @@ class Package(Base):
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+
     add_ons = relationship("PackageAddOn", back_populates="package", cascade="all, delete-orphan")
     media_assets = relationship(
         "MediaAsset",
@@ -80,6 +95,42 @@ class Package(Base):
             }
             for media in self.ordered_media_assets
         ]
+
+    @property
+    def normalized_structured_itinerary(self) -> list[dict]:
+        return list(self.structured_itinerary or [])
+
+    @property
+    def derived_simple_itinerary(self) -> list[dict]:
+        """
+        Derives a simple itinerary from structured data if the latter exists.
+        Ensures backward compatibility with legacy client views.
+        """
+        if self.normalized_structured_itinerary:
+            simple_items: list[dict] = []
+            for day in self.normalized_structured_itinerary:
+                overview = day.get("overview")
+                if overview:
+                    description = overview
+                else:
+                    block_lines = []
+                    for block in day.get("blocks", []) or []:
+                        title = (block.get("title") or "").strip()
+                        desc = (block.get("description") or "").strip()
+                        if title and desc:
+                            block_lines.append(f"{title}: {desc}")
+                        elif title:
+                            block_lines.append(title)
+                    description = " ".join(block_lines).strip()
+
+                simple_items.append({
+                    "day": day.get("day"),
+                    "title": day.get("title") or f"Day {day.get('day')}",
+                    "description": description or "",
+                })
+            return simple_items
+
+        return list(self.itinerary or [])
 
 
 class AddOn(Base):
