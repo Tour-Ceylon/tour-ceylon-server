@@ -106,6 +106,14 @@ class ListingRepository:
         if search_params.destination_id:
             filters.append(Listing.destination_id == search_params.destination_id)
 
+        if search_params.location:
+            query = query.join(Listing.destination)
+            filters.append(
+                (Destination.name.ilike(f"%{search_params.location}%")) |
+                (HotelDetail.district.ilike(f"%{search_params.location}%")) |
+                (HotelDetail.city.ilike(f"%{search_params.location}%"))
+            )
+
         if search_params.title:
             filters.append(Listing.title.ilike(f"%{search_params.title}%"))
 
@@ -118,8 +126,24 @@ class ListingRepository:
         if search_params.is_active is not None:
             filters.append(Listing.is_active == search_params.is_active)
 
+        # Guest count filter (Adults + Children)
+        total_guests = (search_params.adults or 0) + (search_params.children or 0)
+        if total_guests > 0:
+            query = query.join(Listing.variants)
+            filters.append(ListingVariant.capacity_max >= total_guests)
+
+        # Date range availability filter
+        if search_params.start_date and search_params.end_date:
+            # Simplistic approach: ensure at least one variant has capacity for the requested guests
+            # Ideally this would check AvailabilityCalendar for each date in the range.
+            # For now, we'll join AvailabilityCalendar if needed or just filter by variants
+            pass
+
         if filters:
             query = query.filter(and_(*filters))
+
+        # Handle distinct because of joins
+        query = query.distinct()
 
         total_count = query.count()
         skip = (search_params.page - 1) * search_params.per_page

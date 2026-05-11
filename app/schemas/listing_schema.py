@@ -606,9 +606,15 @@ class ListingListResponse(BaseModel):
 class ListingSearchParams(BaseModel):
     listing_type: ListingType | None = None
     destination_id: UUID | None = None
+    location: str | None = None
     title: str | None = None
     base_currency: CurrencyCode | None = None
     status: ListingStatus | None = None
     is_active: bool | None = None
+    start_date: datetime | None = None
+    end_date: datetime | None = None
+    adults: int | None = None
+    children: int | None = None
+    rooms: int | None = None
     page: int = 1
     per_page: int = 20
