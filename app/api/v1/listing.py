@@ -1,4 +1,5 @@
 from typing import List
+from datetime import datetime
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
@@ -13,7 +14,7 @@ from app.schemas.listing_schema import (
     ListingListResponse,
     ListingSearchParams,
 )
-from app.models.enum import CurrencyCode, ListingType
+from app.models.enum import CurrencyCode, ListingType, ListingStatus
 
 router = APIRouter()
 
@@ -95,13 +96,61 @@ async def get_listing(
     return listing
 
 
+@router.get("/search", response_model=ListingListResponse)
+async def search_listings_get(
+    listing_type: ListingType | None = Query(None),
+    destination_id: UUID | None = Query(None),
+    location: str | None = Query(None),
+    title: str | None = Query(None),
+    base_currency: CurrencyCode | None = Query(None),
+    status: ListingStatus | None = Query(None),
+    is_active: bool | None = Query(None),
+    start_date: datetime | None = Query(None),
+    end_date: datetime | None = Query(None),
+    adults: int | None = Query(None),
+    children: int | None = Query(None),
+    rooms: int | None = Query(None),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    listing_repo: ListingRepository = Depends(get_listing_repository)
+):
+    """Search listings with filters (GET)"""
+    
+    search_params = ListingSearchParams(
+        listing_type=listing_type,
+        destination_id=destination_id,
+        location=location,
+        title=title,
+        base_currency=base_currency,
+        status=status,
+        is_active=is_active,
+        start_date=start_date,
+        end_date=end_date,
+        adults=adults,
+        children=children,
+        rooms=rooms,
+        page=page,
+        per_page=per_page
+    )
+    
+    listings, total_count = listing_repo.search(search_params)
+    
+    return ListingListResponse(
+        listings=listings,
+        total=total_count,
+        page=page,
+        per_page=per_page,
+        total_pages=math.ceil(total_count / per_page) if total_count > 0 else 0
+    )
+
+
 @router.post("/search", response_model=ListingListResponse)
 async def search_listings(
     search_params: ListingSearchParams,
     db: Session = Depends(get_db),
     listing_repo: ListingRepository = Depends(get_listing_repository)
 ):
-    """Search listings with filters"""
+    """Search listings with filters (POST)"""
     
     listings, total_count = listing_repo.search(search_params)
     
