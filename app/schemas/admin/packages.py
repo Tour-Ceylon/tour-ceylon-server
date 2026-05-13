@@ -81,6 +81,7 @@ class PackageBase(BaseModel):
     startLocation: str | None = Field(None, validation_alias=AliasChoices("startLocation", "start_location"))
     endLocation: str | None = Field(None, validation_alias=AliasChoices("endLocation", "end_location"))
     tripStyle: str | None = Field(None, validation_alias=AliasChoices("tripStyle", "trip_style"))
+    vendorId: UUID | None = Field(None, validation_alias=AliasChoices("vendorId", "vendor_id"))
     basePrice: float = Field(..., validation_alias=AliasChoices("basePrice", "base_price"))
     image: str | None = None
     category: str
@@ -104,6 +105,7 @@ class PackageUpdate(PackageBase):
 
 class PackageResponse(PackageBase):
     id: UUID
+    vendorId: UUID | None = Field(None, validation_alias=AliasChoices("vendorId", "vendor_id"))
     cover_image: MediaSummary | None = None
     gallery: list[dict] = Field(default_factory=list)
     addOnDetails: list[dict] = Field(default_factory=list, validation_alias=AliasChoices("addOnDetails", "add_on_details"))

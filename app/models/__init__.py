@@ -20,6 +20,7 @@ from app.models.safariDetail import SafariDetail
 from app.models.tourDetail import TourDetail
 from app.models.transferDetail import TransferDetail
 from app.models.user import User
+from app.models.vendor import Vendor
 from app.models.wishlist import Wishlist
 
 __all__ = [
@@ -50,5 +51,6 @@ __all__ = [
     "TourDetail",
     "TransferDetail",
     "User",
+    "Vendor",
     "Wishlist",
 ]

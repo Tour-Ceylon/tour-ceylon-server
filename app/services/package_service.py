@@ -63,6 +63,7 @@ def build_package_response(package) -> dict:
         "startLocation": getattr(package, "start_location", None),
         "endLocation": getattr(package, "end_location", None),
         "tripStyle": getattr(package, "trip_style", None),
+        "vendorId": str(getattr(package, "vendor_id", None)) if getattr(package, "vendor_id", None) else None,
         "basePrice": package.base_price,
         "category": category,
         "includes": package.includes or [],

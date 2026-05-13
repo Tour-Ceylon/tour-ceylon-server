@@ -10,6 +10,7 @@ class Listing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "listings"
 
     destination_id = Column(UUID(as_uuid=True), ForeignKey("destinations.id"), nullable=False, index=True)
+    vendor_id = Column(UUID(as_uuid=True), ForeignKey("vendors.id"), nullable=True, index=True)
 
     listing_type = Column(Enum(ListingType, name="listing_type_enum"), nullable=False, index=True)
     title = Column(String, nullable=False)
@@ -30,6 +31,7 @@ class Listing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     cover_media_id = Column(UUID(as_uuid=True), ForeignKey("media_assets.id"), nullable=True)
 
     destination = relationship("Destination", back_populates="listings")
+    vendor = relationship("Vendor", back_populates="listings")
     media = relationship(
         "ListingMedia",
         back_populates="listing",
@@ -136,7 +138,7 @@ class Listing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
                     item.name.lower(),
                 ),
             )
-            if item.pricing is not None
+            if variant.pricing is not None
         ]
 
     @property

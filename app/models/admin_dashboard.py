@@ -8,6 +8,7 @@ from sqlalchemy.orm import foreign, relationship
 from app.models.base import Base
 from app.models.enum import MediaOwnerType
 from app.models.media import MediaAsset
+from app.models.vendor import Vendor
 
 
 class Package(Base):
@@ -39,6 +40,7 @@ class Package(Base):
     listing_refs = Column(JSON, nullable=False, default=list)
 
     cover_media_id = Column(UUID(as_uuid=True), ForeignKey("media_assets.id"), nullable=True)
+    vendor_id = Column(UUID(as_uuid=True), ForeignKey("vendors.id"), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
@@ -48,6 +50,7 @@ class Package(Base):
     )
 
     add_ons = relationship("PackageAddOn", back_populates="package", cascade="all, delete-orphan")
+    vendor = relationship("Vendor", back_populates="packages")
     media_assets = relationship(
         "MediaAsset",
         primaryjoin=lambda: and_(

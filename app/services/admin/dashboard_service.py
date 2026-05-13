@@ -8,11 +8,13 @@ from app.api.errors import AdminAPIError
 from app.models.destination import Destination
 from app.models.enum import BookingUnit, CurrencyCode, ListingType
 from app.models.listing import Listing
+from app.models.vendor import Vendor
 from app.repositories.admin.addon_repo import AdminAddonRepository
 from app.repositories.admin.destination_repo import AdminDestinationRepository
 from app.repositories.admin.listing_repo import AdminDashboardListingRepository
 from app.repositories.admin.package_repo import AdminPackageRepository
 from app.repositories.admin.settings_repo import AdminSettingsRepository
+from app.repositories.admin.vendor_repo import AdminVendorRepository
 from app.services.package_service import build_package_response
 
 
@@ -34,6 +36,7 @@ class AdminDashboardService:
         self.packages = AdminPackageRepository(db)
         self.settings = AdminSettingsRepository(db)
         self.listings = AdminDashboardListingRepository(db)
+        self.vendors = AdminVendorRepository(db)
 
     def get_snapshot(self) -> dict:
         listing_groups = {"stay": [], "tour": [], "safari": [], "experience": [], "transfer": []}
@@ -184,6 +187,13 @@ class AdminDashboardService:
                 message=f"Unknown add-on IDs: {', '.join(missing_ids)}",
             )
 
+    def _validate_vendor_id(self, vendor_id: UUID) -> None:
+        if self.db.get(Vendor, vendor_id) is None:
+            raise AdminAPIError(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                message="Vendor not found",
+            )
+
     def _validate_category(self, category: str) -> str:
         if category not in self.VALID_LISTING_CATEGORIES:
             raise AdminAPIError(
@@ -203,6 +213,7 @@ class AdminDashboardService:
             "startLocation": "start_location",
             "endLocation": "end_location",
             "tripStyle": "trip_style",
+            "vendorId": "vendor_id",
             "basePrice": "base_price",
             "image": "image",
             "category": "category",
@@ -222,6 +233,13 @@ class AdminDashboardService:
             if partial and source_key not in payload:
                 continue
             value = payload.get(source_key)
+
+            if source_key == "vendorId":
+                if value is not None:
+                    self._validate_vendor_id(value)
+                data[target_key] = value
+                continue
+
             if value is None and partial:
                 continue
             if source_key == "category" and value is not None:
@@ -625,5 +643,60 @@ class AdminDashboardService:
             "availability_notes": detail.availability_notes,
         }
 
+    # --- VENDOR MANAGEMENT ---
+    def create_vendor(self, payload: dict) -> dict:
+        """Create a new vendor"""
+        vendor = self.vendors.create(**payload)
+        return self._build_vendor_response(vendor)
+
+    def get_vendor(self, vendor_id: UUID) -> dict:
+        """Get vendor by ID"""
+        vendor = self.vendors.get(vendor_id)
+        if vendor is None:
+            raise self._not_found("Vendor not found")
+        return self._build_vendor_response(vendor)
+
+    def get_vendors(self, skip: int = 0, limit: int = 100, search: str | None = None) -> dict:
+        """Get all vendors with optional search"""
+        if search:
+            vendors = self.vendors.search(search, skip=skip, limit=limit)
+            total = len(vendors)  # Simplified count for search results
+        else:
+            vendors = self.vendors.get_all(skip=skip, limit=limit)
+            total = self.vendors.get_count()
+        
+        return {
+            "items": [self._build_vendor_response(v) for v in vendors],
+            "total": total,
+        }
+
+    def update_vendor(self, vendor_id: UUID, payload: dict) -> dict:
+        """Update vendor information"""
+        vendor = self.vendors.get(vendor_id)
+        if vendor is None:
+            raise self._not_found("Vendor not found")
+        
+        vendor = self.vendors.update(vendor, payload)
+        return self._build_vendor_response(vendor)
+
+    def delete_vendor(self, vendor_id: UUID) -> None:
+        """Delete vendor (soft delete)"""
+        if not self.vendors.delete(vendor_id):
+            raise self._not_found("Vendor not found")
+
+    def _build_vendor_response(self, vendor: Vendor) -> dict:
+        """Build vendor response object"""
+        return {
+            "id": vendor.id,
+            "name": vendor.name,
+            "email": vendor.email,
+            "phone": vendor.phone,
+            "description": vendor.description,
+            "contact_person": vendor.contact_person,
+            "address": vendor.address,
+            "is_active": vendor.is_active,
+            "created_at": vendor.created_at.isoformat() if vendor.created_at else None,
+            "updated_at": vendor.updated_at.isoformat() if vendor.updated_at else None,
+        }
     def _not_found(self, message: str) -> AdminAPIError:
         return AdminAPIError(status_code=status.HTTP_404_NOT_FOUND, message=message)
