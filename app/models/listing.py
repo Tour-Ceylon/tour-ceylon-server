@@ -9,10 +9,13 @@ from app.models.media import MediaAsset
 class Listing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "listings"
 
-    destination_id = Column(UUID(as_uuid=True), ForeignKey("destinations.id"), nullable=False, index=True)
-    vendor_id = Column(UUID(as_uuid=True), ForeignKey("vendors.id"), nullable=True, index=True)
+    destination_id = Column(UUID(as_uuid=True), ForeignKey(
+        "destinations.id"), nullable=False, index=True)
+    vendor_id = Column(UUID(as_uuid=True), ForeignKey(
+        "vendors.id"), nullable=True, index=True)
 
-    listing_type = Column(Enum(ListingType, name="listing_type_enum"), nullable=False, index=True)
+    listing_type = Column(
+        Enum(ListingType, name="listing_type_enum"), nullable=False, index=True)
     title = Column(String, nullable=False)
     slug = Column(String, unique=True, index=True, nullable=True)
     description = Column(Text, nullable=True)
@@ -28,7 +31,8 @@ class Listing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         default=CurrencyCode.USD,
         nullable=False
     )
-    cover_media_id = Column(UUID(as_uuid=True), ForeignKey("media_assets.id"), nullable=True)
+    cover_media_id = Column(UUID(as_uuid=True), ForeignKey(
+        "media_assets.id"), nullable=True)
 
     destination = relationship("Destination", back_populates="listings")
     vendor = relationship("Vendor", back_populates="listings")
@@ -47,10 +51,13 @@ class Listing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         order_by=lambda: (MediaAsset.sort_order, MediaAsset.created_at),
         viewonly=True,
     )
-    cover_media = relationship("MediaAsset", foreign_keys=[cover_media_id], uselist=False)
-    variants = relationship("ListingVariant", back_populates="listing", cascade="all, delete-orphan")
+    cover_media = relationship("MediaAsset", foreign_keys=[
+                               cover_media_id], uselist=False)
+    variants = relationship(
+        "ListingVariant", back_populates="listing", cascade="all, delete-orphan")
     reviews = relationship("Review", back_populates="listing")
-    wishlisted_by = relationship("Wishlist", back_populates="listing", cascade="all, delete-orphan")
+    wishlisted_by = relationship(
+        "Wishlist", back_populates="listing", cascade="all, delete-orphan")
     booking_items = relationship("BookingItem", back_populates="listing")
     cancellation_policies = relationship(
         "CancellationPolicy",
@@ -144,7 +151,8 @@ class Listing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     @property
     def default_variant(self):
         variants = list(self.variants or [])
-        default = next((variant for variant in variants if variant.is_default), None)
+        default = next(
+            (variant for variant in variants if variant.is_default), None)
         if default and default.pricing is not None:
             return default
         priced_variants = self.priced_variants

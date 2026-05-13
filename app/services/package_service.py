@@ -18,7 +18,8 @@ def _deep_camel_case(obj):
         for k, v in obj.items():
             if isinstance(k, str):
                 components = k.split("_")
-                new_key = components[0] + "".join(x.title() for x in components[1:])
+                new_key = components[0] + \
+                    "".join(x.title() for x in components[1:])
                 new_dict[new_key] = _deep_camel_case(v)
             else:
                 new_dict[k] = _deep_camel_case(v)

@@ -14,7 +14,8 @@ from app.models.vendor import Vendor
 class Package(Base):
     __tablename__ = "Packages"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(UUID(as_uuid=True), primary_key=True,
+                default=uuid.uuid4, index=True)
     name = Column(String, nullable=False)
     description = Column(Text, nullable=False)
     duration = Column(Integer, nullable=False)
@@ -39,9 +40,12 @@ class Package(Base):
     structured_itinerary = Column(JSON, nullable=False, default=list)
     listing_refs = Column(JSON, nullable=False, default=list)
 
-    cover_media_id = Column(UUID(as_uuid=True), ForeignKey("media_assets.id"), nullable=True)
-    vendor_id = Column(UUID(as_uuid=True), ForeignKey("vendors.id"), nullable=True, index=True)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    cover_media_id = Column(UUID(as_uuid=True), ForeignKey(
+        "media_assets.id"), nullable=True)
+    vendor_id = Column(UUID(as_uuid=True), ForeignKey(
+        "vendors.id"), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(
+        timezone.utc), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -49,7 +53,8 @@ class Package(Base):
         nullable=False,
     )
 
-    add_ons = relationship("PackageAddOn", back_populates="package", cascade="all, delete-orphan")
+    add_ons = relationship(
+        "PackageAddOn", back_populates="package", cascade="all, delete-orphan")
     vendor = relationship("Vendor", back_populates="packages")
     media_assets = relationship(
         "MediaAsset",
@@ -60,7 +65,8 @@ class Package(Base):
         order_by=lambda: (MediaAsset.sort_order, MediaAsset.created_at),
         viewonly=True,
     )
-    cover_media = relationship("MediaAsset", foreign_keys=[cover_media_id], uselist=False)
+    cover_media = relationship("MediaAsset", foreign_keys=[
+                               cover_media_id], uselist=False)
 
     @property
     def ordered_media_assets(self) -> list[MediaAsset]:
@@ -139,26 +145,31 @@ class Package(Base):
 class AddOn(Base):
     __tablename__ = "AddOns"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(UUID(as_uuid=True), primary_key=True,
+                default=uuid.uuid4, index=True)
     name = Column(String, nullable=False)
     description = Column(Text, nullable=False)
     price = Column(Float, nullable=False)
     category = Column(String, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(
+        timezone.utc), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
-    package_links = relationship("PackageAddOn", back_populates="add_on", cascade="all, delete-orphan")
+    package_links = relationship(
+        "PackageAddOn", back_populates="add_on", cascade="all, delete-orphan")
 
 
 class PackageAddOn(Base):
     __tablename__ = "PackageAddOns"
 
-    package_id = Column(UUID(as_uuid=True), ForeignKey("Packages.id"), primary_key=True)
-    add_on_id = Column(UUID(as_uuid=True), ForeignKey("AddOns.id"), primary_key=True)
+    package_id = Column(UUID(as_uuid=True), ForeignKey(
+        "Packages.id"), primary_key=True)
+    add_on_id = Column(UUID(as_uuid=True), ForeignKey(
+        "AddOns.id"), primary_key=True)
 
     package = relationship("Package", back_populates="add_ons")
     add_on = relationship("AddOn", back_populates="package_links")
@@ -169,9 +180,11 @@ class AdminSettings(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True, index=True)
     site_name = Column(String, nullable=False, default="Tour Ceylon")
-    contact_email = Column(String, nullable=False, default="support@tourceylon.com")
+    contact_email = Column(String, nullable=False,
+                           default="support@tourceylon.com")
     default_currency = Column(String, nullable=False, default="LKR")
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(
+        timezone.utc), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

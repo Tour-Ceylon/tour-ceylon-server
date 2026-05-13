@@ -57,7 +57,8 @@ class AdminVendorRepository:
         return (
             self.db.query(Vendor)
             .filter(
-                (Vendor.name.ilike(f"%{query}%")) | (Vendor.email.ilike(f"%{query}%"))
+                (Vendor.name.ilike(f"%{query}%")) | (
+                    Vendor.email.ilike(f"%{query}%"))
             )
             .offset(skip)
             .limit(limit)

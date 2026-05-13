@@ -19,7 +19,8 @@ from app.services.package_service import build_package_response
 
 
 class AdminDashboardService:
-    VALID_LISTING_CATEGORIES = {"stay", "tour", "safari", "experience", "transfer"}
+    VALID_LISTING_CATEGORIES = {"stay", "tour",
+                                "safari", "experience", "transfer"}
     LISTING_TYPE_MAP = {
         "stay": ListingType.HOTEL,
         "tour": ListingType.TOUR,
@@ -27,7 +28,8 @@ class AdminDashboardService:
         "experience": ListingType.EXPERIENCE,
         "transfer": ListingType.TRANSFER,
     }
-    CATEGORY_BY_LISTING_TYPE = {value: key for key, value in LISTING_TYPE_MAP.items()}
+    CATEGORY_BY_LISTING_TYPE = {value: key for key,
+                                value in LISTING_TYPE_MAP.items()}
 
     def __init__(self, db: Session):
         self.db = db
@@ -39,11 +41,13 @@ class AdminDashboardService:
         self.vendors = AdminVendorRepository(db)
 
     def get_snapshot(self) -> dict:
-        listing_groups = {"stay": [], "tour": [], "safari": [], "experience": [], "transfer": []}
+        listing_groups = {"stay": [], "tour": [],
+                          "safari": [], "experience": [], "transfer": []}
         for listing in self.listings.get_all_listings():
             category = self.CATEGORY_BY_LISTING_TYPE.get(listing.listing_type)
             if category in listing_groups:
-                listing_groups[category].append(self._build_listing_response(listing))
+                listing_groups[category].append(
+                    self._build_listing_response(listing))
 
         return {
             "packages": [self._build_package_response(package) for package in self.packages.get_all()],
@@ -92,7 +96,8 @@ class AdminDashboardService:
         if package is None:
             raise self._not_found("Package not found")
 
-        package = self.packages.update(package, {"is_active": not package.is_active})
+        package = self.packages.update(
+            package, {"is_active": not package.is_active})
         return self._build_package_response(package)
 
     def create_addon(self, payload: dict) -> dict:
@@ -109,7 +114,8 @@ class AdminDashboardService:
 
     def create_listing(self, category: str, payload: dict) -> dict:
         category = self._validate_category(category)
-        listing = self.listings.create_listing(self._listing_model_data(category, payload))
+        listing = self.listings.create_listing(
+            self._listing_model_data(category, payload))
         return self._build_listing_response(listing)
 
     def update_listing(self, category: str, listing_id: UUID, payload: dict) -> dict:
@@ -118,7 +124,8 @@ class AdminDashboardService:
         if listing is None or listing.listing_type != self.LISTING_TYPE_MAP[category]:
             raise self._not_found("Listing not found")
 
-        listing_updates = self._listing_model_data(category, payload, partial=True)
+        listing_updates = self._listing_model_data(
+            category, payload, partial=True)
         updated = self.listings.update_listing(listing_id, listing_updates)
         if updated is None:
             raise self._not_found("Listing not found")
@@ -249,7 +256,8 @@ class AdminDashboardService:
         # Auto-generate simple itinerary if structured exists but simple doesn't
         if data.get("structured_itinerary"):
             if not data.get("itinerary"):
-                data["itinerary"] = self._derive_simple_itinerary(data["structured_itinerary"])
+                data["itinerary"] = self._derive_simple_itinerary(
+                    data["structured_itinerary"])
 
         return data
 
@@ -310,10 +318,12 @@ class AdminDashboardService:
 
         detail_key = self._detail_key_for_category(category)
         if detail_key in payload and payload[detail_key] is not None:
-            model_data[detail_key] = self._normalize_detail_payload(detail_key, payload[detail_key])
+            model_data[detail_key] = self._normalize_detail_payload(
+                detail_key, payload[detail_key])
         if "variants" in payload and payload["variants"] is not None:
             model_data["variants"] = [
-                self._normalize_variant_payload(category, variant, model_data["base_currency"])
+                self._normalize_variant_payload(
+                    category, variant, model_data["base_currency"])
                 for variant in payload["variants"]
             ]
 
@@ -345,49 +355,74 @@ class AdminDashboardService:
     def _normalize_detail_payload(self, detail_key: str, detail_payload: dict) -> dict:
         normalized = dict(detail_payload)
         if detail_key == "hotel_detail":
-            normalized["check_in_time"] = self._parse_time(normalized["check_in_time"])
-            normalized["check_out_time"] = self._parse_time(normalized["check_out_time"])
+            normalized["check_in_time"] = self._parse_time(
+                normalized["check_in_time"])
+            normalized["check_out_time"] = self._parse_time(
+                normalized["check_out_time"])
             normalized["amenities"] = list(normalized.get("amenities") or [])
-            normalized["languages_spoken"] = list(normalized.get("languages_spoken") or [])
+            normalized["languages_spoken"] = list(
+                normalized.get("languages_spoken") or [])
             normalized["meal_plans"] = list(normalized.get("meal_plans") or [])
         elif detail_key == "tour_detail":
-            normalized["itinerary_highlights"] = list(normalized.get("itinerary_highlights") or [])
-            normalized["included_items"] = list(normalized.get("included_items") or [])
-            normalized["excluded_items"] = list(normalized.get("excluded_items") or [])
+            normalized["itinerary_highlights"] = list(
+                normalized.get("itinerary_highlights") or [])
+            normalized["included_items"] = list(
+                normalized.get("included_items") or [])
+            normalized["excluded_items"] = list(
+                normalized.get("excluded_items") or [])
             normalized["languages"] = list(normalized.get("languages") or [])
-            normalized["what_to_bring"] = list(normalized.get("what_to_bring") or [])
+            normalized["what_to_bring"] = list(
+                normalized.get("what_to_bring") or [])
             if normalized.get("start_time") is not None:
-                normalized["start_time"] = self._parse_time(normalized["start_time"])
+                normalized["start_time"] = self._parse_time(
+                    normalized["start_time"])
             if normalized.get("end_time") is not None:
-                normalized["end_time"] = self._parse_time(normalized["end_time"])
+                normalized["end_time"] = self._parse_time(
+                    normalized["end_time"])
         elif detail_key == "safari_detail":
-            normalized["included_items"] = list(normalized.get("included_items") or [])
-            normalized["excluded_items"] = list(normalized.get("excluded_items") or [])
+            normalized["included_items"] = list(
+                normalized.get("included_items") or [])
+            normalized["excluded_items"] = list(
+                normalized.get("excluded_items") or [])
             normalized["languages"] = list(normalized.get("languages") or [])
-            normalized["what_to_bring"] = list(normalized.get("what_to_bring") or [])
-            normalized["wildlife_highlights"] = list(normalized.get("wildlife_highlights") or [])
+            normalized["what_to_bring"] = list(
+                normalized.get("what_to_bring") or [])
+            normalized["wildlife_highlights"] = list(
+                normalized.get("wildlife_highlights") or [])
             if normalized.get("start_time") is not None:
-                normalized["start_time"] = self._parse_time(normalized["start_time"])
+                normalized["start_time"] = self._parse_time(
+                    normalized["start_time"])
             if normalized.get("end_time") is not None:
-                normalized["end_time"] = self._parse_time(normalized["end_time"])
+                normalized["end_time"] = self._parse_time(
+                    normalized["end_time"])
         elif detail_key == "activity_detail":
-            normalized["included_items"] = list(normalized.get("included_items") or [])
-            normalized["excluded_items"] = list(normalized.get("excluded_items") or [])
+            normalized["included_items"] = list(
+                normalized.get("included_items") or [])
+            normalized["excluded_items"] = list(
+                normalized.get("excluded_items") or [])
             normalized["languages"] = list(normalized.get("languages") or [])
-            normalized["what_to_bring"] = list(normalized.get("what_to_bring") or [])
+            normalized["what_to_bring"] = list(
+                normalized.get("what_to_bring") or [])
             normalized["highlights"] = list(normalized.get("highlights") or [])
             if normalized.get("start_time") is not None:
-                normalized["start_time"] = self._parse_time(normalized["start_time"])
+                normalized["start_time"] = self._parse_time(
+                    normalized["start_time"])
             if normalized.get("end_time") is not None:
-                normalized["end_time"] = self._parse_time(normalized["end_time"])
+                normalized["end_time"] = self._parse_time(
+                    normalized["end_time"])
         elif detail_key == "transfer_detail":
-            normalized["vehicle_types"] = list(normalized.get("vehicle_types") or [])
-            normalized["included_items"] = list(normalized.get("included_items") or [])
-            normalized["excluded_items"] = list(normalized.get("excluded_items") or [])
+            normalized["vehicle_types"] = list(
+                normalized.get("vehicle_types") or [])
+            normalized["included_items"] = list(
+                normalized.get("included_items") or [])
+            normalized["excluded_items"] = list(
+                normalized.get("excluded_items") or [])
             if normalized.get("operating_start_time") is not None:
-                normalized["operating_start_time"] = self._parse_time(normalized["operating_start_time"])
+                normalized["operating_start_time"] = self._parse_time(
+                    normalized["operating_start_time"])
             if normalized.get("operating_end_time") is not None:
-                normalized["operating_end_time"] = self._parse_time(normalized["operating_end_time"])
+                normalized["operating_end_time"] = self._parse_time(
+                    normalized["operating_end_time"])
         return normalized
 
     def _normalize_media_payload(self, media_payload: list[dict] | None) -> list[dict] | None:
@@ -476,7 +511,8 @@ class AdminDashboardService:
     def _build_listing_variant_response(self, variant) -> dict:
         pricing_rules = list(getattr(variant, "pricing_rules", []) or [])
         pricing_rule = (
-            sorted(pricing_rules, key=lambda rule: (rule.priority, rule.created_at, rule.id))[0]
+            sorted(pricing_rules, key=lambda rule: (
+                rule.priority, rule.created_at, rule.id))[0]
             if pricing_rules
             else None
         )
@@ -664,7 +700,7 @@ class AdminDashboardService:
         else:
             vendors = self.vendors.get_all(skip=skip, limit=limit)
             total = self.vendors.get_count()
-        
+
         return {
             "items": [self._build_vendor_response(v) for v in vendors],
             "total": total,
@@ -675,7 +711,7 @@ class AdminDashboardService:
         vendor = self.vendors.get(vendor_id)
         if vendor is None:
             raise self._not_found("Vendor not found")
-        
+
         vendor = self.vendors.update(vendor, payload)
         return self._build_vendor_response(vendor)
 
@@ -698,5 +734,6 @@ class AdminDashboardService:
             "created_at": vendor.created_at.isoformat() if vendor.created_at else None,
             "updated_at": vendor.updated_at.isoformat() if vendor.updated_at else None,
         }
+
     def _not_found(self, message: str) -> AdminAPIError:
         return AdminAPIError(status_code=status.HTTP_404_NOT_FOUND, message=message)

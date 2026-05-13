@@ -12,11 +12,11 @@ class Vendor(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     email = Column(String, unique=True, nullable=False, index=True)
     phone = Column(String, nullable=True)
     description = Column(Text, nullable=True)
-    
+
     # Contact Information
     contact_person = Column(String, nullable=True)
     address = Column(Text, nullable=True)
-    
+
     # Relationships
     packages = relationship("Package", back_populates="vendor")
     listings = relationship("Listing", back_populates="vendor")
