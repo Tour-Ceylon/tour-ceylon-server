@@ -195,7 +195,15 @@ class AdminDashboardService:
             )
 
     def _validate_vendor_id(self, vendor_id: UUID) -> None:
-        if self.db.get(Vendor, vendor_id) is None:
+        try:
+            parsed_vendor_id = vendor_id if isinstance(
+                vendor_id, UUID) else UUID(str(vendor_id))
+        except ValueError as exc:
+            raise AdminAPIError(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                message="Invalid vendor ID",
+            ) from exc
+        if self.db.get(Vendor, parsed_vendor_id) is None:
             raise AdminAPIError(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 message="Vendor not found",
@@ -307,6 +315,7 @@ class AdminDashboardService:
         model_data = {
             "listing_type": self.LISTING_TYPE_MAP[category],
             "destination_id": destination_id,
+            "vendor_id": payload.get("vendor_id"),
             "title": payload.get("title"),
             "slug": payload.get("slug"),
             "description": payload.get("description"),
@@ -315,6 +324,9 @@ class AdminDashboardService:
             "is_active": payload.get("is_active"),
             "base_currency": payload.get("base_currency", CurrencyCode.LKR),
         }
+
+        if model_data.get("vendor_id") is not None:
+            self._validate_vendor_id(model_data["vendor_id"])
 
         detail_key = self._detail_key_for_category(category)
         if detail_key in payload and payload[detail_key] is not None:
@@ -328,7 +340,11 @@ class AdminDashboardService:
             ]
 
         if partial:
-            return {key: value for key, value in model_data.items() if value is not None}
+            return {
+                key: value
+                for key, value in model_data.items()
+                if value is not None or (key == "vendor_id" and "vendor_id" in payload)
+            }
         return model_data
 
     def _normalize_variant_payload(self, category: str, variant_payload: dict, base_currency: CurrencyCode) -> dict:
@@ -482,6 +498,7 @@ class AdminDashboardService:
             "id": listing.id,
             "category": self.CATEGORY_BY_LISTING_TYPE.get(listing.listing_type, listing.listing_type.value),
             "destination_id": listing.destination_id,
+            "vendorId": str(listing.vendor_id) if getattr(listing, "vendor_id", None) else None,
             "title": listing.title,
             "description": listing.description,
             "is_active": listing.is_active,

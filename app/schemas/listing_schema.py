@@ -34,7 +34,8 @@ class CoordinateMixin(BaseModel):
     @model_validator(mode="after")
     def validate_coordinate_pair(self):
         if (self.latitude is None) != (self.longitude is None):
-            raise ValueError("latitude and longitude must be provided together")
+            raise ValueError(
+                "latitude and longitude must be provided together")
         return self
 
 
@@ -277,7 +278,7 @@ class ActivityDetailBase(BaseModel):
 
     @field_validator(
         "included_items",
-        "excluded_items", 
+        "excluded_items",
         "languages",
         "what_to_bring",
         "highlights",
@@ -421,7 +422,8 @@ class ListingVariantCreate(BaseModel):
             and self.capacity_max is not None
             and self.capacity_min > self.capacity_max
         ):
-            raise ValueError("capacity_min cannot be greater than capacity_max")
+            raise ValueError(
+                "capacity_min cannot be greater than capacity_max")
         return self
 
 
@@ -440,6 +442,7 @@ class ListingVariantResponse(BaseModel):
 class ListingBase(CoordinateMixin):
     listing_type: ListingType
     destination_id: UUID
+    vendor_id: UUID | None = None
     title: str
     slug: str | None = None
     description: str | None = None
@@ -466,7 +469,8 @@ class ListingBase(CoordinateMixin):
         }
         expected_detail = detail_fields.get(self.listing_type)
         if expected_detail is None:
-            raise ValueError(f"{self.listing_type.value} listings require the matching detail payload")
+            raise ValueError(
+                f"{self.listing_type.value} listings require the matching detail payload")
 
         # Ensure only one detail payload is provided
         mismatched = [
@@ -509,6 +513,7 @@ class ListingCreate(ListingBase):
 class ListingUpdate(CoordinateMixin):
     listing_type: ListingType | None = None
     destination_id: UUID | None = None
+    vendor_id: UUID | None = None
     title: str | None = None
     slug: str | None = None
     description: str | None = None

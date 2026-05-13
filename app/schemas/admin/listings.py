@@ -1,13 +1,14 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.enum import BookingUnit, CurrencyCode, DestinationType, MediaType, PropertyType, SafariType, TransferLocationType
 from app.schemas.media_schema import MediaAssetPublicResponse, MediaSummary
 
 
-AdminListingCategory = Literal["stay", "tour", "safari", "experience", "transfer"]
+AdminListingCategory = Literal["stay", "tour",
+                               "safari", "experience", "transfer"]
 
 
 class CoordinateMixin(BaseModel):
@@ -17,7 +18,8 @@ class CoordinateMixin(BaseModel):
     @model_validator(mode="after")
     def validate_coordinate_pair(self):
         if (self.latitude is None) != (self.longitude is None):
-            raise ValueError("latitude and longitude must be provided together")
+            raise ValueError(
+                "latitude and longitude must be provided together")
         return self
 
 
@@ -28,7 +30,8 @@ class DestinationRef(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
 
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True, serialize_by_alias=True)
+    model_config = ConfigDict(from_attributes=True,
+                              populate_by_name=True, serialize_by_alias=True)
 
 
 class AdminHotelDetail(BaseModel):
@@ -49,15 +52,19 @@ class AdminHotelDetail(BaseModel):
     website: str | None = None
     google_map_url: str | None = Field(default=None, alias="googleMapUrl")
     amenities: list[str] = Field(default_factory=list)
-    languages_spoken: list[str] = Field(default_factory=list, alias="languagesSpoken")
+    languages_spoken: list[str] = Field(
+        default_factory=list, alias="languagesSpoken")
     room_count: int | None = Field(default=None, alias="roomCount")
-    max_guest_capacity: int | None = Field(default=None, alias="maxGuestCapacity")
+    max_guest_capacity: int | None = Field(
+        default=None, alias="maxGuestCapacity")
     meal_plans: list[str] = Field(default_factory=list, alias="mealPlans")
-    parking_available: bool | None = Field(default=None, alias="parkingAvailable")
+    parking_available: bool | None = Field(
+        default=None, alias="parkingAvailable")
     wifi_available: bool | None = Field(default=None, alias="wifiAvailable")
     pets_allowed: bool | None = Field(default=None, alias="petsAllowed")
     smoking_policy: str | None = Field(default=None, alias="smokingPolicy")
-    cancellation_policy: str | None = Field(default=None, alias="cancellationPolicy")
+    cancellation_policy: str | None = Field(
+        default=None, alias="cancellationPolicy")
     extra_bed_policy: str | None = Field(default=None, alias="extraBedPolicy")
     check_in_notes: str | None = Field(default=None, alias="checkInNotes")
     check_out_notes: str | None = Field(default=None, alias="checkOutNotes")
@@ -76,24 +83,32 @@ class AdminTourDetail(BaseModel):
     duration_days: int = Field(alias="durationDays")
     route_summary: str = Field(alias="routeSummary")
     meeting_point: str = Field(alias="meetingPoint")
-    itinerary_highlights: list[str] = Field(default_factory=list, alias="itineraryHighlights")
-    included_items: list[str] = Field(default_factory=list, alias="includedItems")
-    excluded_items: list[str] = Field(default_factory=list, alias="excludedItems")
+    itinerary_highlights: list[str] = Field(
+        default_factory=list, alias="itineraryHighlights")
+    included_items: list[str] = Field(
+        default_factory=list, alias="includedItems")
+    excluded_items: list[str] = Field(
+        default_factory=list, alias="excludedItems")
     languages: list[str] = Field(default_factory=list)
     difficulty_level: str | None = Field(default=None, alias="difficultyLevel")
     group_size_min: int | None = Field(default=None, alias="groupSizeMin")
     group_size_max: int | None = Field(default=None, alias="groupSizeMax")
-    private_available: bool | None = Field(default=None, alias="privateAvailable")
-    pickup_available: bool | None = Field(default=None, alias="pickupAvailable")
-    dropoff_available: bool | None = Field(default=None, alias="dropoffAvailable")
+    private_available: bool | None = Field(
+        default=None, alias="privateAvailable")
+    pickup_available: bool | None = Field(
+        default=None, alias="pickupAvailable")
+    dropoff_available: bool | None = Field(
+        default=None, alias="dropoffAvailable")
     pickup_notes: str | None = Field(default=None, alias="pickupNotes")
     dropoff_notes: str | None = Field(default=None, alias="dropoffNotes")
     start_time: str | None = Field(default=None, alias="startTime")
     end_time: str | None = Field(default=None, alias="endTime")
-    cancellation_policy: str | None = Field(default=None, alias="cancellationPolicy")
+    cancellation_policy: str | None = Field(
+        default=None, alias="cancellationPolicy")
     what_to_bring: list[str] = Field(default_factory=list, alias="whatToBring")
     child_policy: str | None = Field(default=None, alias="childPolicy")
-    accessibility_info: str | None = Field(default=None, alias="accessibilityInfo")
+    accessibility_info: str | None = Field(
+        default=None, alias="accessibilityInfo")
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
@@ -120,20 +135,26 @@ class AdminSafariDetail(BaseModel):
     pickup_supported: bool = Field(default=False, alias="pickupSupported")
     start_time: str | None = Field(default=None, alias="startTime")
     end_time: str | None = Field(default=None, alias="endTime")
-    included_items: list[str] = Field(default_factory=list, alias="includedItems")
-    excluded_items: list[str] = Field(default_factory=list, alias="excludedItems")
+    included_items: list[str] = Field(
+        default_factory=list, alias="includedItems")
+    excluded_items: list[str] = Field(
+        default_factory=list, alias="excludedItems")
     languages: list[str] = Field(default_factory=list)
     difficulty_level: str | None = Field(default=None, alias="difficultyLevel")
     age_restriction: str | None = Field(default=None, alias="ageRestriction")
-    private_available: bool | None = Field(default=None, alias="privateAvailable")
+    private_available: bool | None = Field(
+        default=None, alias="privateAvailable")
     group_size_min: int | None = Field(default=None, alias="groupSizeMin")
     group_size_max: int | None = Field(default=None, alias="groupSizeMax")
     pickup_notes: str | None = Field(default=None, alias="pickupNotes")
     what_to_bring: list[str] = Field(default_factory=list, alias="whatToBring")
-    cancellation_policy: str | None = Field(default=None, alias="cancellationPolicy")
-    accessibility_info: str | None = Field(default=None, alias="accessibilityInfo")
+    cancellation_policy: str | None = Field(
+        default=None, alias="cancellationPolicy")
+    accessibility_info: str | None = Field(
+        default=None, alias="accessibilityInfo")
     best_season: str | None = Field(default=None, alias="bestSeason")
-    wildlife_highlights: list[str] = Field(default_factory=list, alias="wildlifeHighlights")
+    wildlife_highlights: list[str] = Field(
+        default_factory=list, alias="wildlifeHighlights")
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
@@ -156,22 +177,34 @@ class AdminTransferDetail(BaseModel):
     origin_type: TransferLocationType = Field(alias="originType")
     destination_type: DestinationType = Field(alias="destinationType")
     vehicle_policy: str = Field(alias="vehiclePolicy")
-    vehicle_types: list[str] = Field(default_factory=list, alias="vehicleTypes")
+    vehicle_types: list[str] = Field(
+        default_factory=list, alias="vehicleTypes")
     max_passengers: int | None = Field(default=None, alias="maxPassengers")
     max_luggage: int | None = Field(default=None, alias="maxLuggage")
     air_conditioned: bool | None = Field(default=None, alias="airConditioned")
-    meet_and_greet_included: bool | None = Field(default=None, alias="meetAndGreetIncluded")
-    child_seats_available: bool | None = Field(default=None, alias="childSeatsAvailable")
-    pickup_instructions: str | None = Field(default=None, alias="pickupInstructions")
-    dropoff_instructions: str | None = Field(default=None, alias="dropoffInstructions")
-    operating_start_time: str | None = Field(default=None, alias="operatingStartTime")
-    operating_end_time: str | None = Field(default=None, alias="operatingEndTime")
-    estimated_duration_minutes: int | None = Field(default=None, alias="estimatedDurationMinutes")
+    meet_and_greet_included: bool | None = Field(
+        default=None, alias="meetAndGreetIncluded")
+    child_seats_available: bool | None = Field(
+        default=None, alias="childSeatsAvailable")
+    pickup_instructions: str | None = Field(
+        default=None, alias="pickupInstructions")
+    dropoff_instructions: str | None = Field(
+        default=None, alias="dropoffInstructions")
+    operating_start_time: str | None = Field(
+        default=None, alias="operatingStartTime")
+    operating_end_time: str | None = Field(
+        default=None, alias="operatingEndTime")
+    estimated_duration_minutes: int | None = Field(
+        default=None, alias="estimatedDurationMinutes")
     route_notes: str | None = Field(default=None, alias="routeNotes")
-    included_items: list[str] = Field(default_factory=list, alias="includedItems")
-    excluded_items: list[str] = Field(default_factory=list, alias="excludedItems")
-    cancellation_policy: str | None = Field(default=None, alias="cancellationPolicy")
-    waiting_time_policy: str | None = Field(default=None, alias="waitingTimePolicy")
+    included_items: list[str] = Field(
+        default_factory=list, alias="includedItems")
+    excluded_items: list[str] = Field(
+        default_factory=list, alias="excludedItems")
+    cancellation_policy: str | None = Field(
+        default=None, alias="cancellationPolicy")
+    waiting_time_policy: str | None = Field(
+        default=None, alias="waitingTimePolicy")
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
@@ -248,6 +281,11 @@ class ListingFromPriceResponse(ListingVariantPriceInput):
 
 class AdminListingBase(CoordinateMixin):
     destination_id: UUID = Field(alias="destinationId")
+    vendor_id: UUID | None = Field(
+        default=None,
+        alias="vendorId",
+        validation_alias=AliasChoices("vendorId", "vendor_id"),
+    )
     title: str
     description: str | None = None
     is_active: bool = Field(default=True, alias="isActive")
@@ -279,12 +317,15 @@ class StayListingResponse(AdminListingBase):
     id: UUID
     category: Literal["stay"]
     destination: DestinationRef | None = None
-    media: list[AdminListingMediaResponse] = Field(default_factory=list, exclude=True)
-    from_price: ListingFromPriceResponse | None = Field(default=None, alias="fromPrice")
+    media: list[AdminListingMediaResponse] = Field(
+        default_factory=list, exclude=True)
+    from_price: ListingFromPriceResponse | None = Field(
+        default=None, alias="fromPrice")
     cover_image: MediaSummary | None = None
     gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
     variants: list[ListingVariantAdminResponse] = Field(default_factory=list)
-    hotel_detail: AdminHotelDetail | None = Field(default=None, alias="hotelDetail")
+    hotel_detail: AdminHotelDetail | None = Field(
+        default=None, alias="hotelDetail")
 
 
 class TourListingCreate(AdminListingBase):
@@ -303,12 +344,15 @@ class TourListingResponse(AdminListingBase):
     id: UUID
     category: Literal["tour"]
     destination: DestinationRef | None = None
-    media: list[AdminListingMediaResponse] = Field(default_factory=list, exclude=True)
-    from_price: ListingFromPriceResponse | None = Field(default=None, alias="fromPrice")
+    media: list[AdminListingMediaResponse] = Field(
+        default_factory=list, exclude=True)
+    from_price: ListingFromPriceResponse | None = Field(
+        default=None, alias="fromPrice")
     cover_image: MediaSummary | None = None
     gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
     variants: list[ListingVariantAdminResponse] = Field(default_factory=list)
-    tour_detail: AdminTourDetail | None = Field(default=None, alias="tourDetail")
+    tour_detail: AdminTourDetail | None = Field(
+        default=None, alias="tourDetail")
 
 
 class AdminActivityDetail(BaseModel):
@@ -317,27 +361,34 @@ class AdminActivityDetail(BaseModel):
     meeting_point: str | None = Field(default=None, alias="meetingPoint")
     start_time: str | None = Field(default=None, alias="startTime")
     end_time: str | None = Field(default=None, alias="endTime")
-    included_items: list[str] = Field(default_factory=list, alias="includedItems")
-    excluded_items: list[str] = Field(default_factory=list, alias="excludedItems")
+    included_items: list[str] = Field(
+        default_factory=list, alias="includedItems")
+    excluded_items: list[str] = Field(
+        default_factory=list, alias="excludedItems")
     languages: list[str] = Field(default_factory=list)
     difficulty_level: str | None = Field(default=None, alias="difficultyLevel")
     age_restriction: str | None = Field(default=None, alias="ageRestriction")
-    private_available: bool | None = Field(default=None, alias="privateAvailable")
+    private_available: bool | None = Field(
+        default=None, alias="privateAvailable")
     group_size_min: int | None = Field(default=None, alias="groupSizeMin")
     group_size_max: int | None = Field(default=None, alias="groupSizeMax")
-    pickup_supported: bool | None = Field(default=None, alias="pickupSupported")
+    pickup_supported: bool | None = Field(
+        default=None, alias="pickupSupported")
     pickup_notes: str | None = Field(default=None, alias="pickupNotes")
     what_to_bring: list[str] = Field(default_factory=list, alias="whatToBring")
-    cancellation_policy: str | None = Field(default=None, alias="cancellationPolicy")
-    accessibility_info: str | None = Field(default=None, alias="accessibilityInfo")
+    cancellation_policy: str | None = Field(
+        default=None, alias="cancellationPolicy")
+    accessibility_info: str | None = Field(
+        default=None, alias="accessibilityInfo")
     highlights: list[str] = Field(default_factory=list)
-    availability_notes: str | None = Field(default=None, alias="availabilityNotes")
+    availability_notes: str | None = Field(
+        default=None, alias="availabilityNotes")
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
     @field_validator(
         "included_items",
-        "excluded_items", 
+        "excluded_items",
         "languages",
         "what_to_bring",
         "highlights",
@@ -366,12 +417,15 @@ class SafariListingResponse(AdminListingBase):
     id: UUID
     category: Literal["safari"]
     destination: DestinationRef | None = None
-    media: list[AdminListingMediaResponse] = Field(default_factory=list, exclude=True)
-    from_price: ListingFromPriceResponse | None = Field(default=None, alias="fromPrice")
+    media: list[AdminListingMediaResponse] = Field(
+        default_factory=list, exclude=True)
+    from_price: ListingFromPriceResponse | None = Field(
+        default=None, alias="fromPrice")
     cover_image: MediaSummary | None = None
     gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
     variants: list[ListingVariantAdminResponse] = Field(default_factory=list)
-    safari_detail: AdminSafariDetail | None = Field(default=None, alias="safariDetail")
+    safari_detail: AdminSafariDetail | None = Field(
+        default=None, alias="safariDetail")
 
 
 class ExperienceListingCreate(AdminListingBase):
@@ -390,12 +444,15 @@ class ExperienceListingResponse(AdminListingBase):
     id: UUID
     category: Literal["experience"]
     destination: DestinationRef | None = None
-    media: list[AdminListingMediaResponse] = Field(default_factory=list, exclude=True)
-    from_price: ListingFromPriceResponse | None = Field(default=None, alias="fromPrice")
+    media: list[AdminListingMediaResponse] = Field(
+        default_factory=list, exclude=True)
+    from_price: ListingFromPriceResponse | None = Field(
+        default=None, alias="fromPrice")
     cover_image: MediaSummary | None = None
     gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
     variants: list[ListingVariantAdminResponse] = Field(default_factory=list)
-    activity_detail: AdminActivityDetail | None = Field(default=None, alias="activityDetail")
+    activity_detail: AdminActivityDetail | None = Field(
+        default=None, alias="activityDetail")
 
 
 class TransferListingCreate(AdminListingBase):
@@ -414,24 +471,37 @@ class TransferListingResponse(AdminListingBase):
     id: UUID
     category: Literal["transfer"]
     destination: DestinationRef | None = None
-    media: list[AdminListingMediaResponse] = Field(default_factory=list, exclude=True)
-    from_price: ListingFromPriceResponse | None = Field(default=None, alias="fromPrice")
+    media: list[AdminListingMediaResponse] = Field(
+        default_factory=list, exclude=True)
+    from_price: ListingFromPriceResponse | None = Field(
+        default=None, alias="fromPrice")
     cover_image: MediaSummary | None = None
     gallery: list[MediaAssetPublicResponse] = Field(default_factory=list)
     variants: list[ListingVariantAdminResponse] = Field(default_factory=list)
-    transfer_detail: AdminTransferDetail | None = Field(default=None, alias="transferDetail")
+    transfer_detail: AdminTransferDetail | None = Field(
+        default=None, alias="transferDetail")
 
 
 class ListingUpdateRequest(CoordinateMixin):
     destination_id: UUID | None = Field(default=None, alias="destinationId")
+    vendor_id: UUID | None = Field(
+        default=None,
+        alias="vendorId",
+        validation_alias=AliasChoices("vendorId", "vendor_id"),
+    )
     title: str | None = None
     description: str | None = None
     is_active: bool | None = Field(default=None, alias="isActive")
-    hotel_detail: AdminHotelDetail | None = Field(default=None, alias="hotelDetail")
-    tour_detail: AdminTourDetail | None = Field(default=None, alias="tourDetail")
-    safari_detail: AdminSafariDetail | None = Field(default=None, alias="safariDetail")
-    activity_detail: AdminActivityDetail | None = Field(default=None, alias="activityDetail")
-    transfer_detail: AdminTransferDetail | None = Field(default=None, alias="transferDetail")
+    hotel_detail: AdminHotelDetail | None = Field(
+        default=None, alias="hotelDetail")
+    tour_detail: AdminTourDetail | None = Field(
+        default=None, alias="tourDetail")
+    safari_detail: AdminSafariDetail | None = Field(
+        default=None, alias="safariDetail")
+    activity_detail: AdminActivityDetail | None = Field(
+        default=None, alias="activityDetail")
+    transfer_detail: AdminTransferDetail | None = Field(
+        default=None, alias="transferDetail")
     media: list[AdminListingMedia] | None = None
     variants: list[ListingVariantAdminInput] | None = None
 

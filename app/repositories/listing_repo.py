@@ -28,10 +28,12 @@ class ListingRepository:
         ListingType.TRANSFER: ("transfer_detail", TransferDetail),
         ListingType.EXPERIENCE: ("activity_detail", ActivityDetail),
     }
-    DETAIL_FIELDS = {"hotel_detail", "tour_detail", "safari_detail", "transfer_detail", "activity_detail"}
+    DETAIL_FIELDS = {"hotel_detail", "tour_detail",
+                     "safari_detail", "transfer_detail", "activity_detail"}
     BASE_FIELDS = {
         "listing_type",
         "destination_id",
+        "vendor_id",
         "title",
         "slug",
         "description",
@@ -58,18 +60,21 @@ class ListingRepository:
             joinedload(Listing.transfer_detail),
             joinedload(Listing.activity_detail),
             selectinload(Listing.media_assets),
-            selectinload(Listing.variants).selectinload(ListingVariant.pricing_rules),
+            selectinload(Listing.variants).selectinload(
+                ListingVariant.pricing_rules),
         )
 
     def create(self, listing_data: ListingCreate) -> Listing:
         payload = listing_data.model_dump()
-        base_data = {key: value for key, value in payload.items() if key in self.BASE_FIELDS}
+        base_data = {key: value for key,
+                     value in payload.items() if key in self.BASE_FIELDS}
         db_listing = Listing(**base_data)
         self.db.add(db_listing)
         self.db.flush()
 
         self._sync_detail(db_listing, db_listing.listing_type, payload)
-        self._validate_variant_payload(db_listing.listing_type, payload.get(self.VARIANTS_FIELD))
+        self._validate_variant_payload(
+            db_listing.listing_type, payload.get(self.VARIANTS_FIELD))
         self._replace_variants(db_listing, payload.get(self.VARIANTS_FIELD))
         self._sync_media(db_listing, payload.get(self.MEDIA_FIELD))
 
@@ -104,7 +109,8 @@ class ListingRepository:
             filters.append(Listing.listing_type == search_params.listing_type)
 
         if search_params.destination_id:
-            filters.append(Listing.destination_id == search_params.destination_id)
+            filters.append(Listing.destination_id ==
+                           search_params.destination_id)
 
         if search_params.location:
             query = query.join(Listing.destination)
@@ -118,7 +124,8 @@ class ListingRepository:
             filters.append(Listing.title.ilike(f"%{search_params.title}%"))
 
         if search_params.base_currency:
-            filters.append(Listing.base_currency == search_params.base_currency)
+            filters.append(Listing.base_currency ==
+                           search_params.base_currency)
 
         if search_params.status:
             filters.append(Listing.status == search_params.status)
@@ -127,7 +134,8 @@ class ListingRepository:
             filters.append(Listing.is_active == search_params.is_active)
 
         # Guest count filter (Adults + Children)
-        total_guests = (search_params.adults or 0) + (search_params.children or 0)
+        total_guests = (search_params.adults or 0) + \
+            (search_params.children or 0)
         if total_guests > 0:
             query = query.join(Listing.variants)
             filters.append(ListingVariant.capacity_max >= total_guests)
@@ -156,10 +164,14 @@ class ListingRepository:
             return None
 
         update_data = listing_data.model_dump(exclude_unset=True)
-        detail_data = {key: value for key, value in update_data.items() if key in self.DETAIL_FIELDS}
-        base_update_data = {key: value for key, value in update_data.items() if key in self.BASE_FIELDS}
-        media_data = update_data.get(self.MEDIA_FIELD) if self.MEDIA_FIELD in update_data else None
-        variants_data = update_data.get(self.VARIANTS_FIELD) if self.VARIANTS_FIELD in update_data else None
+        detail_data = {key: value for key,
+                       value in update_data.items() if key in self.DETAIL_FIELDS}
+        base_update_data = {
+            key: value for key, value in update_data.items() if key in self.BASE_FIELDS}
+        media_data = update_data.get(
+            self.MEDIA_FIELD) if self.MEDIA_FIELD in update_data else None
+        variants_data = update_data.get(
+            self.VARIANTS_FIELD) if self.VARIANTS_FIELD in update_data else None
 
         previous_type = db_listing.listing_type
         for field, value in base_update_data.items():
@@ -284,8 +296,10 @@ class ListingRepository:
             self._base_query()
             .filter(
                 and_(
-                    Listing.latitude.between(latitude - lat_diff, latitude + lat_diff),
-                    Listing.longitude.between(longitude - lng_diff, longitude + lng_diff),
+                    Listing.latitude.between(
+                        latitude - lat_diff, latitude + lat_diff),
+                    Listing.longitude.between(
+                        longitude - lng_diff, longitude + lng_diff),
                     Listing.latitude.is_not(None),
                     Listing.longitude.is_not(None),
                 )
@@ -354,7 +368,8 @@ class ListingRepository:
         if listing_type != ListingType.HOTEL or variants_payload is None:
             return
         if any(variant["booking_unit"] != BookingUnit.PER_ROOM for variant in variants_payload):
-            raise ValueError("hotel listing variants must use per_room booking")
+            raise ValueError(
+                "hotel listing variants must use per_room booking")
 
     def update_cover_media(self, listing: Listing, media_id: UUID | None) -> Listing:
         listing.cover_media_id = media_id
