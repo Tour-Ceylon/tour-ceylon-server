@@ -1,7 +1,7 @@
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models.activityDetail import ActivityDetail
@@ -107,12 +107,39 @@ class ListingRepository:
             filters.append(Listing.destination_id == search_params.destination_id)
 
         if search_params.location:
-            query = query.join(Listing.destination)
-            filters.append(
-                (Destination.name.ilike(f"%{search_params.location}%")) |
-                (HotelDetail.district.ilike(f"%{search_params.location}%")) |
-                (HotelDetail.city.ilike(f"%{search_params.location}%"))
-            )
+            # Outer join all possible location-related tables to avoid excluding listings
+            query = query.outerjoin(Listing.destination)\
+                         .outerjoin(Listing.hotel_detail)\
+                         .outerjoin(Listing.safari_detail)\
+                         .outerjoin(Listing.activity_detail)\
+                         .outerjoin(Listing.tour_detail)
+            
+            # Split into terms for a smarter "AND" search across multiple fields
+            terms = search_params.location.strip().split()
+            if terms:
+                # Ensure all tables are outer-joined once for filtering
+                query = query.outerjoin(Listing.destination)\
+                             .outerjoin(Listing.hotel_detail)\
+                             .outerjoin(Listing.safari_detail)\
+                             .outerjoin(Listing.activity_detail)\
+                             .outerjoin(Listing.tour_detail)
+                
+                for term in terms:
+                    t_q = f"%{term}%"
+                    query = query.filter(
+                        or_(
+                            Listing.title.ilike(t_q),
+                            Listing.description.ilike(t_q),
+                            Destination.name.ilike(t_q),
+                            HotelDetail.property_name.ilike(t_q),
+                            HotelDetail.district.ilike(t_q),
+                            HotelDetail.city.ilike(t_q),
+                            HotelDetail.short_location.ilike(t_q),
+                            SafariDetail.national_park.ilike(t_q),
+                            ActivityDetail.meeting_point.ilike(t_q),
+                            TourDetail.route_summary.ilike(t_q)
+                        )
+                    )
 
         if search_params.title:
             filters.append(Listing.title.ilike(f"%{search_params.title}%"))
