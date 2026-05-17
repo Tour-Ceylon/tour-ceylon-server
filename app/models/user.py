@@ -25,6 +25,7 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     bookings = relationship("Booking", back_populates="user")
     wishlists = relationship("Wishlist", back_populates="user")
     reviews = relationship("Review", back_populates="user")
+    transport_bookings = relationship("TransportBooking", back_populates="user")
     changed_booking_statuses = relationship(
         "BookingStatusHistory",
         back_populates="changed_by_user",

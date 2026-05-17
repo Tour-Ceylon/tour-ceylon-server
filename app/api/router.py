@@ -13,6 +13,7 @@ from app.api.v1 import (
     review_metrics,
     rooms,
     includes,
+    transport
 )
 
 api_router = APIRouter()
@@ -88,4 +89,10 @@ api_router.include_router(
     includes.router,
     prefix="/listing-addons",
     tags=["listing-addons"]
+)
+
+api_router.include_router(
+    transport.router,
+    prefix="/transport",
+    tags=["transport"]
 )
