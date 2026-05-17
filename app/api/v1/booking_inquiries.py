@@ -23,7 +23,7 @@ from app.integrations.email_provider import email_provider
 router = APIRouter()
 
 
-async def send_inquiry_notification_email(inquiry: BookingInquiryDetailed):
+def send_inquiry_notification_email(inquiry: BookingInquiryDetailed):
     """Background task to send booking inquiry notification email to business team"""
     try:
         success = email_provider.send_booking_inquiry_notification(inquiry)
@@ -35,7 +35,7 @@ async def send_inquiry_notification_email(inquiry: BookingInquiryDetailed):
         logger.error(f"Error sending business notification email: {str(e)}")
 
 
-async def send_customer_confirmation_email(inquiry: BookingInquiryDetailed):
+def send_customer_confirmation_email(inquiry: BookingInquiryDetailed):
     """Background task to send booking inquiry confirmation email to customer"""
     try:
         success = email_provider.send_booking_inquiry_customer_confirmation(inquiry)
