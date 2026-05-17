@@ -19,6 +19,9 @@ from app.models.review import Review
 from app.models.safariDetail import SafariDetail
 from app.models.tourDetail import TourDetail
 from app.models.transferDetail import TransferDetail
+from app.models.vehicleCategory import VehicleCategory
+from app.models.transportRoute import TransportRoute
+from app.models.transportBooking import TransportBooking
 from app.models.user import User
 from app.models.wishlist import Wishlist
 
@@ -49,6 +52,9 @@ __all__ = [
     "SafariDetail",
     "TourDetail",
     "TransferDetail",
+    "VehicleCategory",
+    "TransportRoute",
+    "TransportBooking",
     "User",
     "Wishlist",
 ]
