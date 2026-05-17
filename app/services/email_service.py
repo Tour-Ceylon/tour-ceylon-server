@@ -4,6 +4,7 @@ from typing import Dict, Any
 from app.integrations.email_provider import email_provider
 from app.repositories.otp_repo import get_otp_repository
 from app.core.logging import logger
+from starlette.concurrency import run_in_threadpool
 
 
 async def send_verification_otp(
@@ -15,7 +16,7 @@ async def send_verification_otp(
         otp_repo = get_otp_repository(db)
         otp = otp_repo.create(email)
 
-        success = email_provider.send_otp_email(email, otp.code)
+        success = await run_in_threadpool(email_provider.send_otp_email, email, otp.code)
 
         if success:
             logger.info("Verification OTP sent to %s", email)
