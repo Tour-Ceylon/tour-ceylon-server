@@ -2,10 +2,19 @@ from enum import Enum
 
 
 class UserRole(str, Enum):
-    TOURIST = "tourist"
+    TOURIST = "tourist"    # Legacy client-facing default
+    CUSTOMER = "customer"  # Alias for TOURIST (client frontend may use)
+    CLIENT = "client"      # Alias for TOURIST (client frontend may use)
     ADMIN = "admin"
     SUPPORT = "support"
     VENDOR = "vendor"
+
+
+class VendorStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    SUSPENDED = "suspended"
 
 
 class ListingType(str, Enum):

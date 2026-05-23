@@ -10,6 +10,8 @@ from app.config.database import get_db
 from app.models.user import User
 from app.services.email_service import send_verification_otp, verify_otp_code
 from app.services.auth_service import verify_username as verify_username_service
+from app.api.deps import get_current_user
+from app.schemas.user_schema import UserResponse
 
 
 logger = logging.getLogger("app.auth")
@@ -232,6 +234,14 @@ async def verify_code(request: VerifyCodeRequest, db: Session = Depends(get_db))
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to verify code"
         )
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_me(
+    current_user: User = Depends(get_current_user),
+):
+    """Get the authenticated local user resolved from Clerk auth."""
+    return current_user
 
 
 @router.get("/health")

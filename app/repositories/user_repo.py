@@ -22,7 +22,11 @@ class UserRepository:
             full_name=user_data.full_name,
             country=user_data.country,
             role=user_data.role,
-            is_active=user_data.is_active
+            is_active=user_data.is_active,
+            vendor_status=getattr(user_data, "vendor_status", None),
+            approved_categories=getattr(user_data, "approved_categories", []),
+            company_name=getattr(user_data, "company_name", None),
+            business_profile=getattr(user_data, "business_profile", {})
         )
         self.db.add(db_user)
         self.db.commit()
