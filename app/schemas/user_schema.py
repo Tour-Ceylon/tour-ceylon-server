@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
-from pydantic import BaseModel, EmailStr, ConfigDict
+from pydantic import BaseModel, EmailStr, ConfigDict, Field, computed_field
 
 from app.models.enum import UserRole
 
@@ -18,7 +18,11 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     """Schema for creating a new user"""
-    pass
+    vendor_status: Optional[str] = None
+    approved_categories: Optional[List[str]] = None
+    company_name: Optional[str] = None
+    business_profile: Optional[Dict[str, Any]] = None
+
 
 
 class UserUpdate(BaseModel):
@@ -28,15 +32,58 @@ class UserUpdate(BaseModel):
     country: Optional[str] = None
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
+    # Vendor fields — only set by admin or internal sync
+    vendor_status: Optional[str] = None
+    approved_categories: Optional[List[str]] = None
+    company_name: Optional[str] = None
+    business_profile: Optional[Dict[str, Any]] = None
 
 
 class UserResponse(UserBase):
-    """Schema for user API responses"""
+    """Schema for user API responses — includes vendor fields when present"""
     id: UUID
     created_at: datetime
     updated_at: datetime
-    
-    model_config = ConfigDict(from_attributes=True)
+
+    # Vendor-specific fields (null for non-vendor users)
+    vendor_status: Optional[str] = None
+    approved_categories: Optional[List[str]] = None
+    company_name: Optional[str] = None
+    business_profile: Optional[Dict[str, Any]] = None
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+    @computed_field
+    @property
+    def clerkUserId(self) -> Optional[str]:
+        return self.clerk_user_id
+
+    @computed_field
+    @property
+    def name(self) -> Optional[str]:
+        return self.full_name
+
+    @computed_field
+    @property
+    def vendorStatus(self) -> Optional[str]:
+        return self.vendor_status
+
+    @computed_field
+    @property
+    def approvedCategories(self) -> Optional[List[str]]:
+        return self.approved_categories
+
+    @computed_field
+    @property
+    def company(self) -> Optional[str]:
+        return self.company_name
+
+    @computed_field
+    @property
+    def businessProfile(self) -> Optional[Dict[str, Any]]:
+        return self.business_profile
 
 
 class UserInDB(UserResponse):
@@ -46,7 +93,7 @@ class UserInDB(UserResponse):
 
 class UserListResponse(BaseModel):
     """Schema for paginated user list responses"""
-    users: list[UserResponse]
+    users: List[UserResponse]
     total: int
     page: int
     per_page: int
@@ -61,3 +108,19 @@ class UserSearchParams(BaseModel):
     is_active: Optional[bool] = None
     page: int = 1
     per_page: int = 20
+
+
+class VendorApply(BaseModel):
+    """Schema for submitting a vendor application"""
+    business_name: str = Field(..., alias="businessName")
+    vendor_name: str = Field(..., alias="vendorName")
+    email: EmailStr
+    phone: str
+    country: str
+    business_description: str = Field(..., alias="businessDescription")
+    categories: List[str]
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+
