@@ -1,9 +1,14 @@
+import os
+import logging
+import httpx
 from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, status
 from jose import JWTError, jwt
 
 from app.config.settings import settings
+
+logger = logging.getLogger("app.auth")
 
 
 class ClerkTokenVerifier:
@@ -69,3 +74,58 @@ class ClerkTokenVerifier:
 
 
 clerk_verifier = ClerkTokenVerifier()
+
+
+def sync_user_metadata_to_clerk(
+    clerk_user_id: str,
+    role: str,
+    vendor_status: Optional[str] = None,
+    approved_categories: Optional[list] = None,
+    company_name: Optional[str] = None,
+) -> bool:
+    """
+    Sync user's role and vendor status back to Clerk's public_metadata.
+    This serves as a fallback for frontends (since Clerk JWT holds these claims).
+    """
+    secret_key = settings.CLERK_SECRET_KEY or os.getenv("CLERK_SECRET_KEY")
+    if not secret_key:
+        logger.warning("Clerk secret key is not set; skipping metadata sync.")
+        return False
+
+    if not clerk_user_id:
+        logger.warning("No clerk_user_id provided for metadata sync.")
+        return False
+
+    base_url = os.getenv("CLERK_API_URL", "https://api.clerk.com/v1").rstrip("/")
+    url = f"{base_url}/users/{clerk_user_id}/metadata"
+
+    public_metadata = {
+        "role": role,
+    }
+    if vendor_status is not None:
+        public_metadata["vendorStatus"] = vendor_status
+    if approved_categories is not None:
+        public_metadata["approvedCategories"] = approved_categories
+    if company_name is not None:
+        public_metadata["company"] = company_name
+
+    payload = {
+        "public_metadata": public_metadata
+    }
+
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            response = client.patch(
+                url,
+                headers={
+                    "Authorization": f"Bearer {secret_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            response.raise_for_status()
+            logger.info("Successfully synced metadata to Clerk for user %s", clerk_user_id)
+            return True
+    except Exception as exc:
+        logger.error("Failed to sync metadata to Clerk for user %s: %s", clerk_user_id, str(exc))
+        return False
