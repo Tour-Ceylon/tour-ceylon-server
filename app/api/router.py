@@ -13,7 +13,8 @@ from app.api.v1 import (
     review_metrics,
     rooms,
     includes,
-    transport
+    transport,
+    vendor_stays,
 )
 
 api_router = APIRouter()
@@ -95,4 +96,10 @@ api_router.include_router(
     transport.router,
     prefix="/transport",
     tags=["transport"]
+)
+
+api_router.include_router(
+    vendor_stays.router,
+    prefix="/vendor/stays",
+    tags=["vendor-stays"]
 )
