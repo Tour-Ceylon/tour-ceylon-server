@@ -42,7 +42,8 @@ def _mask_database_url(url: str) -> str:
     return urlunsplit((parsed.scheme, f"{auth}{hostname}{port}", parsed.path, parsed.query, parsed.fragment))
 
 
-print(f"[database] DATABASE_URL resolved to: {_mask_database_url(DATABASE_URL)}")
+print(
+    f"[database] DATABASE_URL resolved to: {_mask_database_url(DATABASE_URL)}")
 
 engine_kwargs: dict[str, object] = {
     "pool_pre_ping": True,
@@ -70,6 +71,8 @@ SessionLocal = sessionmaker(
 )
 
 # Dependency for FastAPI routes
+
+
 def get_db():
     db = SessionLocal()
     try:

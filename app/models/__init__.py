@@ -17,6 +17,15 @@ from app.models.paymentTransactionHistory import PaymentTransaction
 from app.models.pricingRule import PricingRule
 from app.models.review import Review
 from app.models.safariDetail import SafariDetail
+from app.models.stay import (
+    StayProperty,
+    StayPropertyAmenity,
+    StayPropertyAmenityMap,
+    StayRoomProp,
+    StayRoomPropMap,
+    StayRoomType,
+    StayRoomUnit,
+)
 from app.models.tourDetail import TourDetail
 from app.models.transferDetail import TransferDetail
 from app.models.vehicleCategory import VehicleCategory
@@ -50,6 +59,13 @@ __all__ = [
     "PricingRule",
     "Review",
     "SafariDetail",
+    "StayProperty",
+    "StayPropertyAmenity",
+    "StayPropertyAmenityMap",
+    "StayRoomProp",
+    "StayRoomPropMap",
+    "StayRoomType",
+    "StayRoomUnit",
     "TourDetail",
     "TransferDetail",
     "VehicleCategory",
