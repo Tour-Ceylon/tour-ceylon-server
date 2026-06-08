@@ -1,17 +1,18 @@
 import builtins
 
-from sqlalchemy import Column, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Column, DateTime, Enum, ForeignKey, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
-from app.models.base import Base, TimestampMixin, UUIDMixin
+from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
+from app.models.enum import StayStatus
 
 
-class StayProperty(Base, UUIDMixin, TimestampMixin):
+class StayProperty(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "stay_properties"
 
-    vendor_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
-    listing_id = Column(UUID(as_uuid=True), ForeignKey("listings.id"), nullable=True, index=True)
+    vendor_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    listing_id = Column(UUID(as_uuid=True), ForeignKey("listings.id", ondelete="SET NULL"), nullable=True, index=True)
 
     name = Column(String(255), nullable=False)
     property_type = Column(String(80), nullable=False)
@@ -21,15 +22,24 @@ class StayProperty(Base, UUIDMixin, TimestampMixin):
     district = Column(String(120), nullable=True)
     latitude = Column(Numeric(10, 7), nullable=True)
     longitude = Column(Numeric(10, 7), nullable=True)
-    status = Column(String(50), nullable=False, default="draft", index=True)
+    status = Column(
+        Enum(StayStatus, name="stay_status_enum"),
+        default=StayStatus.DRAFT,
+        nullable=False,
+        index=True
+    )
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    archived_by_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    archive_reason = Column(Text, nullable=True)
     application_note = Column(Text, nullable=True)
     contact = Column(JSONB, nullable=False, default=dict)
     policies = Column(JSONB, nullable=False, default=dict)
     media = Column(JSONB, nullable=False, default=list)
     metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
 
-    vendor = relationship("User")
-    listing = relationship("Listing")
+    vendor = relationship("User", foreign_keys=[vendor_id])
+    archived_by = relationship("User", foreign_keys=[archived_by_id])
+    listing = relationship("Listing", back_populates="stay_properties")
     amenities = relationship(
         "StayPropertyAmenityMap",
         back_populates="property",

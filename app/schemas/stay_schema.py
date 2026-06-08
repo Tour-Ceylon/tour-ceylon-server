@@ -24,7 +24,7 @@ class StayRoomTypeInput(BaseModel):
     size: str | None = None
     size_unit: str | None = Field(default=None, alias="sizeUnit")
     max_guests: int | None = Field(default=None, alias="maxGuests", ge=1)
-    base_price: Decimal | None = Field(default=None, alias="basePrice", ge=0)
+    base_price: Decimal | None = Field(default=None, alias="basePrice", ge=0, json_schema_extra={"format": "decimal"})
     currency: str = "LKR"
     smoking: bool | None = None
     guest_access: bool | None = Field(default=None, alias="guestAccess")
@@ -52,7 +52,7 @@ class StayPropertyCreate(BaseModel):
     policies: dict = Field(default_factory=dict)
     media: list[dict] = Field(default_factory=list)
     amenities: list[StayAmenityInput] = Field(default_factory=list)
-    room_types: list[StayRoomTypeInput] = Field(alias="roomTypes", min_length=1)
+    room_types: list[StayRoomTypeInput] = Field(alias="roomTypes", min_length=0)
     metadata: dict = Field(default_factory=dict)
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
@@ -90,12 +90,12 @@ class StayRoomTypeResponse(BaseModel):
     description: str | None = None
     size: str | None = None
     size_unit: str | None = Field(default=None, alias="sizeUnit")
-    max_guests: str | None = Field(default=None, alias="maxGuests")
+    max_guests: int | None = Field(default=None, alias="maxGuests")  # Fixed: should be int, not str
     base_price: Decimal | None = Field(default=None, alias="basePrice")
     currency: str
-    bed_configuration: dict = Field(alias="bedConfiguration")
-    bathroom: dict
-    discounts: list[dict]
+    bed_configuration: dict = Field(default_factory=dict, alias="bedConfiguration")
+    bathroom: dict = Field(default_factory=dict)
+    discounts: list[dict] = Field(default_factory=list)
     room_units: list[StayRoomUnitResponse] = Field(default_factory=list, alias="roomUnits")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True, serialize_by_alias=True)
@@ -115,10 +115,10 @@ class StayPropertyResponse(BaseModel):
     longitude: Decimal | None = None
     status: str
     application_note: str | None = Field(default=None, alias="applicationNote")
-    contact: dict
-    policies: dict
-    media: list[dict]
-    metadata_json: dict = Field(validation_alias="metadata_json", serialization_alias="metadata")
+    contact: dict = Field(default_factory=dict)
+    policies: dict = Field(default_factory=dict)
+    media: list[dict] = Field(default_factory=list)
+    metadata_json: dict = Field(default_factory=dict, validation_alias="metadata_json", serialization_alias="metadata", exclude_none=True)
     amenities: list[StayAmenityResponse] = Field(default_factory=list)
     room_types: list[StayRoomTypeResponse] = Field(default_factory=list, alias="roomTypes")
     created_at: datetime = Field(alias="createdAt")

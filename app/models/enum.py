@@ -27,7 +27,9 @@ class ListingType(str, Enum):
 
 class ListingStatus(str, Enum):
     DRAFT = "draft"
+    SUBMITTED = "submitted"
     PUBLISHED = "published"
+    REJECTED = "rejected"
     ARCHIVED = "archived"
 
 
@@ -176,6 +178,14 @@ class InquiryStatus(str, Enum):
     QUOTED = "quoted"
     CONVERTED_TO_BOOKING = "converted_to_booking"
     CANCELLED = "cancelled"
+
+
+class StayStatus(str, Enum):
+    DRAFT = "DRAFT"
+    SUBMITTED = "SUBMITTED"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    ARCHIVED = "ARCHIVED"
 
 
 PropertType = PropertyType

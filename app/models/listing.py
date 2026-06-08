@@ -10,6 +10,7 @@ class Listing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "listings"
 
     destination_id = Column(UUID(as_uuid=True), ForeignKey("destinations.id"), nullable=False, index=True)
+    vendor_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=True, index=True)
 
     listing_type = Column(Enum(ListingType, name="listing_type_enum"), nullable=False, index=True)
     title = Column(String, nullable=False)
@@ -30,6 +31,7 @@ class Listing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     cover_media_id = Column(UUID(as_uuid=True), ForeignKey("media_assets.id"), nullable=True)
 
     destination = relationship("Destination", back_populates="listings")
+    vendor = relationship("User", foreign_keys=[vendor_id])
     media = relationship(
         "ListingMedia",
         back_populates="listing",
@@ -85,6 +87,7 @@ class Listing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    stay_properties = relationship("StayProperty", back_populates="listing")
 
     @property
     def ordered_media_assets(self) -> list[MediaAsset]:
@@ -95,21 +98,36 @@ class Listing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
 
     @property
     def cover_image(self) -> dict | None:
+        # First try MediaAsset (preferred)
         media = self.cover_media or next(
             (item for item in self.ordered_media_assets if item.is_primary),
             None,
         )
-        if media is None:
-            return None
-        return {
-            "id": media.id,
-            "url": media.secure_url,
-            "alt_text": media.alt_text,
-        }
+        if media is not None:
+            return {
+                "id": media.id,
+                "url": media.secure_url,
+                "alt_text": media.alt_text,
+            }
+        
+        # Fallback to ListingMedia for compatibility with vendor-created listings
+        listing_media = next(
+            (item for item in (self.media or []) if item.is_cover),
+            None,
+        )
+        if listing_media is not None:
+            return {
+                "id": listing_media.id,
+                "url": listing_media.url,
+                "alt_text": listing_media.alt_text,
+            }
+        
+        return None
 
     @property
     def gallery(self) -> list[dict]:
-        return [
+        # First try MediaAssets (preferred)
+        media_assets_gallery = [
             {
                 "id": media.id,
                 "url": media.secure_url,
@@ -122,6 +140,27 @@ class Listing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
             }
             for media in self.ordered_media_assets
         ]
+        
+        # If we have MediaAssets, return them
+        if media_assets_gallery:
+            return media_assets_gallery
+        
+        # Fallback to ListingMedia for compatibility with vendor-created listings
+        listing_media_gallery = [
+            {
+                "id": media.id,
+                "url": media.url,
+                "alt_text": media.alt_text,
+                "sort_order": media.sort_order,
+                "is_primary": media.is_cover,  # Use is_cover as is_primary equivalent
+                "width": None,
+                "height": None,
+                "format": None,
+            }
+            for media in sorted(self.media or [], key=lambda x: x.sort_order)
+        ]
+        
+        return listing_media_gallery
 
     @property
     def priced_variants(self) -> list:

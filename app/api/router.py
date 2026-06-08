@@ -15,6 +15,7 @@ from app.api.v1 import (
     includes,
     transport,
     vendor_stays,
+    vendor_listings,
 )
 
 api_router = APIRouter()
@@ -102,4 +103,10 @@ api_router.include_router(
     vendor_stays.router,
     prefix="/vendor/stays",
     tags=["vendor-stays"]
+)
+
+api_router.include_router(
+    vendor_listings.router,
+    prefix="/vendor/listings",
+    tags=["vendor-listings"]
 )

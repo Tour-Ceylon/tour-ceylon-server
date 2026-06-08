@@ -32,6 +32,7 @@ class ListingRepository:
     BASE_FIELDS = {
         "listing_type",
         "destination_id",
+        "vendor_id",
         "title",
         "slug",
         "description",
@@ -343,7 +344,48 @@ class ListingRepository:
             self.db.delete(existing_detail)
 
     def _sync_media(self, listing: Listing, media_payload: list[dict] | None) -> None:
-        return
+        """Sync media assets for listing"""
+        if not media_payload:
+            return
+            
+        # Import here to avoid circular imports
+        from app.models.listingMedia import ListingMedia
+        from app.models.enum import MediaType
+        
+        # Clear existing media
+        existing_media = self.db.query(ListingMedia).filter(
+            ListingMedia.listing_id == listing.id
+        ).all()
+        for media in existing_media:
+            self.db.delete(media)
+        self.db.flush()
+        
+        # Create new media records
+        cover_media = None
+        for media_data in media_payload:
+            db_media = ListingMedia(
+                listing_id=listing.id,
+                media_type=MediaType.IMAGE,
+                url=media_data["url"],
+                alt_text=media_data["alt_text"],
+                sort_order=media_data["sort_order"],
+                is_cover=media_data.get("is_cover", False)
+            )
+            self.db.add(db_media)
+            
+            # Track cover media for setting cover_media_id
+            if media_data.get("is_cover", False):
+                cover_media = db_media
+        
+        self.db.flush()
+        
+        # Update listing's cover_media_id if we have a cover image
+        # Note: This assumes we're using ListingMedia, not MediaAsset for cover
+        # If MediaAsset is preferred, this would need adjustment
+        if cover_media:
+            # For now, we'll leave cover_media_id as None since it references MediaAsset
+            # but we have the cover info in ListingMedia.is_cover
+            pass
 
     def _replace_variants(self, listing: Listing, variants_payload: list[dict] | None) -> None:
         if variants_payload is None:
