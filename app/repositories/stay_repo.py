@@ -1,11 +1,28 @@
 import base64
 import binascii
 import re
+import logging
+from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy.orm import Session, joinedload
 
+logger = logging.getLogger(__name__)
+
 from app.integrations.cloudinary import upload_image
+from app.models.destination import Destination
+from app.models.enum import (
+    BookingUnit,
+    CurrencyCode,
+    DestinationType,
+    ListingStatus,
+    ListingType,
+    PricingRuleType,
+    StayStatus,
+)
+from app.models.listing import Listing
+from app.models.listingVariant import ListingVariant
+from app.models.pricingRule import PricingRule
 from app.models.stay import (
     StayProperty,
     StayPropertyAmenity,
@@ -13,10 +30,6 @@ from app.models.stay import (
     StayRoomType,
     StayRoomUnit,
 )
-from app.models.listing import Listing
-from app.models.destination import Destination
-from app.models.enum import ListingType, ListingStatus, CurrencyCode, DestinationType, StayStatus
-from app.repositories.listing_repo import ListingRepository
 from app.schemas.stay_schema import StayPropertyCreate
 
 
@@ -34,218 +47,102 @@ class StayRepository:
         )
 
     def create_for_vendor(self, vendor_id: UUID, payload: StayPropertyCreate) -> StayProperty:
+        """Create a submitted stay, linked parent listing, room variants, and inventory."""
         try:
-            # Step 1: Create StayProperty (Listing is only created when approved by admin)
             data = payload.model_dump(by_alias=False)
-            property_data = {
-                key: value
-                for key, value in data.items()
-                if key not in {"amenities", "room_types", "metadata"}
-            }
-            property_data["vendor_id"] = vendor_id
-            property_data["listing_id"] = None  # Decoupled on vendor create
-            property_data["metadata_json"] = data.get("metadata") or {}
+            self._normalize_room_type_names(data.get("room_types") or [])
 
-            property_data["media"] = self._normalize_media_payload(
-                property_data.get("media") or [],
-                vendor_id=vendor_id,
-            )
+            # STEP 1: Create listing first - this MUST succeed and have an ID
+            listing = self._create_listing_parent(vendor_id, data)
+            
+            # CRITICAL VALIDATION: listing must have ID after flush
+            if not listing or not listing.id:
+                raise RuntimeError("CRITICAL ERROR: Listing creation failed - no listing ID obtained")
+            
+            logger.info(f"✓ Created parent listing.id={listing.id}")
 
-            # Ensure proper status handling and validation for StayProperty
-            status_input = property_data.get("status", "SUBMITTED")
-            if isinstance(status_input, str):
-                status_upper = status_input.upper()
-                if status_upper == "DRAFT":
-                    property_data["status"] = StayStatus.DRAFT
-                elif status_upper == "SUBMITTED":
-                    property_data["status"] = StayStatus.SUBMITTED
-                elif status_upper in ["APPROVED", "REJECTED", "ARCHIVED"]:
-                    raise ValueError(f"Vendors are not allowed to set status to {status_upper}")
-                else:
-                    raise ValueError(f"Invalid status: {status_input}")
-            elif isinstance(status_input, StayStatus):
-                if status_input in [StayStatus.APPROVED, StayStatus.REJECTED, StayStatus.ARCHIVED]:
-                    raise ValueError(f"Vendors are not allowed to set status to {status_input.value}")
-                property_data["status"] = status_input
-            else:
-                raise ValueError(f"Invalid status type")
-
+            # STEP 2: Build property data with MANDATORY listing_id assignment
+            property_data = self._build_property_data(data, vendor_id)
+            property_data["listing_id"] = listing.id
+            
+            # DOUBLE CHECK: Ensure listing_id is assigned in property_data
+            if property_data.get("listing_id") is None:
+                raise RuntimeError("CRITICAL ERROR: Failed to assign listing_id to property_data")
+            
+            # STEP 3: Create StayProperty with listing_id
             db_property = StayProperty(**property_data)
             self.db.add(db_property)
             self.db.flush()
 
-            # Step 2: Create amenity mappings
-            for amenity_data in data.get("amenities", []):
-                amenity = self._get_or_create_amenity(amenity_data)
-                self.db.add(
-                    StayPropertyAmenityMap(
-                        property_id=db_property.id,
-                        amenity_id=amenity.id,
-                        value=self._wrap_amenity_value(amenity_data.get("value")),
-                    )
-                )
+            # TRIPLE CHECK: Verify listing_id was set on the StayProperty object
+            if db_property.listing_id is None:
+                raise RuntimeError("CRITICAL ERROR: StayProperty.listing_id is NULL after creation")
+            
+            if db_property.listing_id != listing.id:
+                raise RuntimeError(f"CRITICAL ERROR: StayProperty.listing_id ({db_property.listing_id}) does not match created listing.id ({listing.id})")
+            
+            logger.info(f"✓ Created stay_property.id={db_property.id} with listing_id={db_property.listing_id}")
 
-            # Step 3: Create room types and units
-            for room_type_data in data.get("room_types", []):
-                count = room_type_data.pop("count", 1)
-                room_units = room_type_data.pop("room_units", None)
-                unit_prefix = room_type_data.pop("unit_prefix", None)
-                floor = room_type_data.pop("floor", None)
-                metadata = room_type_data.pop("metadata", {}) or {}
-                for metadata_field in ("smoking", "guest_access"):
-                    value = room_type_data.pop(metadata_field, None)
-                    if value is not None:
-                        metadata[metadata_field] = value
-                if room_type_data.get("max_guests") is not None:
-                    room_type_data["max_guests"] = str(room_type_data["max_guests"])
-                room_type_data["property_id"] = db_property.id
-                room_type_data["metadata_json"] = metadata
+            # STEP 4: Create related data
+            self._replace_amenities(db_property.id, data.get("amenities") or [])
+            self._create_room_types_and_units(db_property.id, listing.id, data.get("room_types") or [])
 
-                room_type = StayRoomType(**room_type_data)
-                self.db.add(room_type)
-                self.db.flush()
-
-                unit_numbers = room_units or self._generate_room_numbers(room_type.name, unit_prefix, count)
-                for unit_number in unit_numbers:
-                    self.db.add(
-                        StayRoomUnit(
-                            property_id=db_property.id,
-                            room_type_id=room_type.id,
-                            room_number=unit_number,
-                            floor=floor,
-                            status="available",
-                        )
-                    )
-
-            # Commit all changes
+            # FINAL VALIDATION: listing_id must still be set before commit
+            self.db.refresh(db_property)
+            if db_property.listing_id is None:
+                raise RuntimeError("CRITICAL ERROR: StayProperty.listing_id became NULL before commit")
+            
+            # ATOMIC COMMIT: All or nothing
             self.db.commit()
+            logger.info(f"✓ Successfully committed stay creation: stay.id={db_property.id}, listing.id={listing.id}")
+            
             return self.get_for_vendor(vendor_id, db_property.id)
-        
         except Exception as e:
-            # Transaction safety: rollback everything
             self.db.rollback()
-            raise e
+            logger.error(f"✗ Stay creation failed for vendor={vendor_id}: {str(e)}")
+            raise
 
     def update_for_vendor(self, vendor_id: UUID, property_id: UUID, payload: StayPropertyCreate) -> StayProperty | None:
-        """Update an existing stay property for a vendor"""
-        # First verify ownership and get existing property
         existing_property = self.get_for_vendor(vendor_id, property_id)
         if not existing_property:
             return None
 
         data = payload.model_dump(by_alias=False)
-        
-        # Update main property fields
-        property_data = {
-            key: value
-            for key, value in data.items()
-            if key not in {"amenities", "room_types", "metadata"}
-        }
-        property_data["metadata_json"] = data.get("metadata") or {}
-        property_data["media"] = self._normalize_media_payload(
-            property_data.get("media") or [],
-            vendor_id=vendor_id,
-        )
+        self._normalize_room_type_names(data.get("room_types") or [])
 
-        # Validate and normalize status
-        status_input = property_data.get("status", "SUBMITTED")
-        if isinstance(status_input, str):
-            status_upper = status_input.upper()
-            if status_upper == "DRAFT":
-                normalized_status = StayStatus.DRAFT
-            elif status_upper == "SUBMITTED":
-                normalized_status = StayStatus.SUBMITTED
-            elif status_upper in ["APPROVED", "REJECTED", "ARCHIVED"]:
-                raise ValueError(f"Vendors are not allowed to set status to {status_upper}")
-            else:
-                raise ValueError(f"Invalid status: {status_input}")
-        elif isinstance(status_input, StayStatus):
-            if status_input in [StayStatus.APPROVED, StayStatus.REJECTED, StayStatus.ARCHIVED]:
-                raise ValueError(f"Vendors are not allowed to set status to {status_input.value}")
-            normalized_status = status_input
-        else:
-            raise ValueError(f"Invalid status type")
+        try:
+            property_data = self._build_property_data(data, vendor_id)
+            property_data.pop("vendor_id", None)
+            property_data.pop("listing_id", None)
 
-        if existing_property.status in [StayStatus.APPROVED, StayStatus.REJECTED, StayStatus.ARCHIVED]:
-            if normalized_status != existing_property.status:
-                raise ValueError(f"Cannot change status of a stay that is already {existing_property.status.value}")
+            if existing_property.status in {StayStatus.APPROVED, StayStatus.REJECTED, StayStatus.ARCHIVED}:
+                new_status = property_data.get("status")
+                if new_status != existing_property.status:
+                    raise ValueError(f"Cannot change status of a stay that is already {existing_property.status.value}")
 
-        property_data["status"] = normalized_status
-        # Ensure we do not overwrite listing_id from payload (keep existing listing_id)
-        if "listing_id" in property_data:
-            del property_data["listing_id"]
+            for key, value in property_data.items():
+                if hasattr(existing_property, key):
+                    setattr(existing_property, key, value)
 
-        # Update the main property record
-        for key, value in property_data.items():
-            if hasattr(existing_property, key):
-                setattr(existing_property, key, value)
+            self._replace_amenities(property_id, data.get("amenities") or [])
 
-        # Replace amenity mappings - delete old ones first
-        self.db.query(StayPropertyAmenityMap).filter(
-            StayPropertyAmenityMap.property_id == property_id
-        ).delete()
-        self.db.flush()
-
-        # Add new amenity mappings
-        for amenity_data in data.get("amenities", []):
-            amenity = self._get_or_create_amenity(amenity_data)
-            self.db.add(
-                StayPropertyAmenityMap(
-                    property_id=property_id,
-                    amenity_id=amenity.id,
-                    value=self._wrap_amenity_value(amenity_data.get("value")),
-                )
-            )
-
-        # Check if Stay is linked to marketplace before allowing destructive room updates
-        if existing_property.listing_id is not None:
-            # Property is linked to marketplace - block destructive room updates
-            new_room_types = data.get("room_types", [])
-            if new_room_types:
+            if existing_property.listing_id is not None and data.get("room_types"):
                 raise ValueError(
-                    "Room configuration cannot be replaced after listing is linked/published. "
+                    "Room configuration cannot be replaced after listing is linked. "
                     "Use room inventory management instead."
                 )
-        else:
-            # Safe to replace room types and room units for unlinked draft stays
-            self.db.query(StayRoomUnit).filter(StayRoomUnit.property_id == property_id).delete()
-            self.db.query(StayRoomType).filter(StayRoomType.property_id == property_id).delete()
-            self.db.flush()
 
-        # Add new room types and room units (only for unlinked stays)
-        for room_type_data in data.get("room_types", []):
-            count = room_type_data.pop("count", 1)
-            room_units = room_type_data.pop("room_units", None)
-            unit_prefix = room_type_data.pop("unit_prefix", None)
-            floor = room_type_data.pop("floor", None)
-            metadata = room_type_data.pop("metadata", {}) or {}
-            for metadata_field in ("smoking", "guest_access"):
-                value = room_type_data.pop(metadata_field, None)
-                if value is not None:
-                    metadata[metadata_field] = value
-            if room_type_data.get("max_guests") is not None:
-                room_type_data["max_guests"] = str(room_type_data["max_guests"])
-            room_type_data["property_id"] = property_id
-            room_type_data["metadata_json"] = metadata
+            if existing_property.listing_id is None:
+                self.db.query(StayRoomUnit).filter(StayRoomUnit.property_id == property_id).delete()
+                self.db.query(StayRoomType).filter(StayRoomType.property_id == property_id).delete()
+                self.db.flush()
+                self._create_room_types_and_units(property_id, None, data.get("room_types") or [])
 
-            room_type = StayRoomType(**room_type_data)
-            self.db.add(room_type)
-            self.db.flush()
-
-            unit_numbers = room_units or self._generate_room_numbers(room_type.name, unit_prefix, count)
-            for unit_number in unit_numbers:
-                self.db.add(
-                    StayRoomUnit(
-                        property_id=property_id,
-                        room_type_id=room_type.id,
-                        room_number=unit_number,
-                        floor=floor,
-                        status="available",
-                    )
-                )
-
-        self.db.commit()
-        return self.get_for_vendor(vendor_id, property_id)
+            self.db.commit()
+            return self.get_for_vendor(vendor_id, property_id)
+        except Exception:
+            self.db.rollback()
+            raise
 
     def list_for_vendor(self, vendor_id: UUID) -> list[StayProperty]:
         return (
@@ -267,6 +164,199 @@ class StayRepository:
 
     def get_by_id(self, property_id: UUID) -> StayProperty | None:
         return self._base_query().filter(StayProperty.id == property_id).first()
+
+    def archive_for_vendor(self, vendor_id: UUID, property_id: UUID, reason: str = None) -> StayProperty | None:
+        existing_property = self.get_for_vendor(vendor_id, property_id)
+        if not existing_property:
+            return None
+        if existing_property.status == StayStatus.ARCHIVED:
+            raise ValueError("Stay property is already archived")
+
+        existing_property.status = StayStatus.ARCHIVED
+        existing_property.is_active = False
+        existing_property.archived_at = datetime.now(timezone.utc)
+        existing_property.archived_by_id = vendor_id
+        existing_property.archive_reason = reason
+
+        if existing_property.listing_id and existing_property.listing:
+            existing_property.listing.status = ListingStatus.ARCHIVED
+            existing_property.listing.is_active = False
+
+        self.db.commit()
+        return existing_property
+
+    def delete_for_vendor(self, vendor_id: UUID, property_id: UUID) -> StayProperty | None:
+        existing_property = self.get_for_vendor(vendor_id, property_id)
+        if not existing_property:
+            return None
+        if existing_property.status != StayStatus.DRAFT:
+            raise ValueError("Only DRAFT stay properties can be permanently deleted")
+
+        try:
+            self.db.delete(existing_property)
+            self.db.commit()
+            return existing_property
+        except Exception:
+            self.db.rollback()
+            raise
+
+    def _build_property_data(self, data: dict, vendor_id: UUID) -> dict:
+        property_data = {
+            key: value
+            for key, value in data.items()
+            if key not in {"amenities", "room_types", "metadata"}
+        }
+        property_data["vendor_id"] = vendor_id
+        property_data["metadata_json"] = data.get("metadata") or {}
+        property_data["media"] = self._normalize_media_payload(
+            property_data.get("media") or [],
+            vendor_id=vendor_id,
+        )
+        property_data["status"] = self._normalize_vendor_status(property_data.get("status", "SUBMITTED"))
+        return property_data
+
+    @staticmethod
+    def _normalize_vendor_status(status_input) -> StayStatus:
+        if isinstance(status_input, StayStatus):
+            status = status_input
+        elif isinstance(status_input, str):
+            try:
+                status = StayStatus(status_input.upper())
+            except ValueError as exc:
+                raise ValueError(f"Invalid status: {status_input}") from exc
+        else:
+            raise ValueError("Invalid status type")
+
+        if status in {StayStatus.APPROVED, StayStatus.REJECTED, StayStatus.ARCHIVED}:
+            raise ValueError(f"Vendors are not allowed to set status to {status.value}")
+        return status
+
+    def _replace_amenities(self, property_id: UUID, amenities: list[dict]) -> None:
+        self.db.query(StayPropertyAmenityMap).filter(
+            StayPropertyAmenityMap.property_id == property_id
+        ).delete()
+        self.db.flush()
+
+        for amenity_data in amenities:
+            amenity = self._get_or_create_amenity(amenity_data)
+            self.db.add(
+                StayPropertyAmenityMap(
+                    property_id=property_id,
+                    amenity_id=amenity.id,
+                    value=self._wrap_amenity_value(amenity_data.get("value")),
+                )
+            )
+
+    def _create_room_types_and_units(
+        self,
+        property_id: UUID,
+        listing_id: UUID | None,
+        room_types: list[dict],
+    ) -> None:
+        for room_type_data in room_types:
+            room_data = dict(room_type_data)
+            count = room_data.pop("count", 1)
+            room_units = room_data.pop("room_units", None)
+            unit_prefix = room_data.pop("unit_prefix", None)
+            floor = room_data.pop("floor", None)
+            metadata = room_data.pop("metadata", {}) or {}
+            for metadata_field in ("smoking", "guest_access"):
+                value = room_data.pop(metadata_field, None)
+                if value is not None:
+                    metadata[metadata_field] = value
+            if room_data.get("max_guests") is not None:
+                room_data["max_guests"] = str(room_data["max_guests"])
+            room_data["property_id"] = property_id
+            room_data["metadata_json"] = metadata
+
+            room_type = StayRoomType(**room_data)
+            self.db.add(room_type)
+            self.db.flush()
+
+            if listing_id is not None:
+                self._create_listing_variant_for_room(listing_id, room_type)
+
+            unit_numbers = room_units or self._generate_room_numbers(room_type.name, unit_prefix, count)
+            for unit_number in unit_numbers:
+                self.db.add(
+                    StayRoomUnit(
+                        property_id=property_id,
+                        room_type_id=room_type.id,
+                        room_number=unit_number,
+                        floor=floor,
+                        status="available",
+                    )
+                )
+
+    def _create_listing_parent(self, vendor_id: UUID, data: dict) -> Listing:
+        destination = self._get_or_create_destination(data)
+        listing = Listing(
+            vendor_id=vendor_id,
+            destination_id=destination.id,
+            listing_type=ListingType.HOTEL,
+            title=data["name"],
+            description=data.get("description"),
+            latitude=float(data["latitude"]) if data.get("latitude") is not None else None,
+            longitude=float(data["longitude"]) if data.get("longitude") is not None else None,
+            status=ListingStatus.SUBMITTED,
+            base_currency=self._coerce_currency(self._first_room_currency(data.get("room_types") or [])),
+            is_active=True,
+        )
+        try:
+            self.db.add(listing)
+            self.db.flush()
+            
+            if not listing.id:
+                raise RuntimeError("Listing was created but has no ID")
+            
+            logger.info(f"Successfully created parent listing.id={listing.id} for vendor={vendor_id}")
+            return listing
+        except Exception as e:
+            logger.error(f"Failed to create parent listing for vendor={vendor_id}: {str(e)}")
+            raise RuntimeError(f"Failed to create parent listing: {str(e)}") from e
+
+    def _get_or_create_destination(self, data: dict) -> Destination:
+        name = (data.get("city") or data.get("district") or data.get("address") or "Sri Lanka").strip()
+        destination = self.db.query(Destination).filter(Destination.name == name).first()
+        if destination:
+            return destination
+
+        destination = Destination(
+            name=name,
+            destination_type=DestinationType.CITY,
+            latitude=float(data["latitude"]) if data.get("latitude") is not None else None,
+            longitude=float(data["longitude"]) if data.get("longitude") is not None else None,
+            is_active=True,
+        )
+        self.db.add(destination)
+        self.db.flush()
+        return destination
+
+    def _create_listing_variant_for_room(self, listing_id: UUID, room_type: StayRoomType) -> None:
+        variant = ListingVariant(
+            listing_id=listing_id,
+            name=room_type.name,
+            booking_unit=BookingUnit.PER_ROOM,
+            capacity_min=1,
+            capacity_max=int(room_type.max_guests) if room_type.max_guests else None,
+            is_default=self.db.query(ListingVariant).filter(ListingVariant.listing_id == listing_id).count() == 0,
+        )
+        self.db.add(variant)
+        self.db.flush()
+
+        if room_type.base_price is None:
+            return
+
+        variant.pricing_rules.append(
+            PricingRule(
+                pricing_rule_type=PricingRuleType.FIXED,
+                min_guest=1,
+                max_guest=int(room_type.max_guests) if room_type.max_guests else 999999,
+                amount=float(room_type.base_price),
+                currency=self._coerce_currency(room_type.currency),
+                priority=0,
+            )
+        )
 
     def _get_or_create_amenity(self, amenity_data: dict) -> StayPropertyAmenity:
         name = amenity_data["name"].strip()
@@ -293,6 +383,55 @@ class StayRepository:
         if isinstance(value, dict):
             return value
         return {"value": value}
+
+    @classmethod
+    def _normalize_room_type_names(cls, room_types: list[dict]) -> None:
+        for room_type_data in room_types:
+            if room_type_data.get("name"):
+                room_type_data["name"] = cls._normalize_room_type_name(room_type_data["name"])
+
+    @staticmethod
+    def _normalize_room_type_name(name: str) -> str:
+        name = name.strip()
+        room_type_mapping = {
+            "bedroom": "Bedroom",
+            "bed room": "Bedroom",
+            "bedrooms": "Bedroom",
+            "bed rooms": "Bedroom",
+            "living room": "Living Room",
+            "livingroom": "Living Room",
+            "living rooms": "Living Room",
+            "livingrooms": "Living Room",
+            "bathroom": "Bathroom",
+            "bath room": "Bathroom",
+            "bathrooms": "Bathroom",
+            "bath rooms": "Bathroom",
+            "kitchen": "Kitchen",
+            "kitchens": "Kitchen",
+            "dining room": "Dining Room",
+            "diningroom": "Dining Room",
+            "dining rooms": "Dining Room",
+            "diningrooms": "Dining Room",
+            "office": "Office",
+            "offices": "Office",
+            "study": "Study",
+            "studio": "Studio",
+            "suite": "Suite",
+            "suites": "Suite",
+            "deluxe room": "Deluxe Room",
+            "deluxe": "Deluxe Room",
+            "standard room": "Standard Room",
+            "standard": "Standard Room",
+            "single room": "Single Room",
+            "single": "Single Room",
+            "double room": "Double Room",
+            "double": "Double Room",
+            "twin room": "Twin Room",
+            "twin": "Twin Room",
+            "master bedroom": "Master Bedroom",
+            "master bed room": "Master Bedroom",
+        }
+        return room_type_mapping.get(name.lower(), name.title())
 
     @staticmethod
     def _generate_room_numbers(name: str, prefix: str | None, count: int) -> list[str]:
@@ -345,112 +484,19 @@ class StayRepository:
 
         return normalized
 
-    def _create_listing_for_stay(self, vendor_id: UUID, payload: StayPropertyCreate) -> Listing:
-        """Create a Listing record for the Stay property"""
-        # Resolve or create destination
-        destination = self._get_or_create_destination(payload)
+    @staticmethod
+    def _first_room_currency(room_types: list[dict]) -> str:
+        for room_type in room_types:
+            currency = room_type.get("currency")
+            if currency:
+                return currency
+        return CurrencyCode.LKR.value
 
-        # Determine currency (use LKR as default for stays)
-        currency = CurrencyCode.LKR
-        if hasattr(payload, 'room_types') and payload.room_types:
-            first_room = payload.room_types[0]
-            if hasattr(first_room, 'currency') and first_room.currency:
-                try:
-                    currency = CurrencyCode(first_room.currency.upper())
-                except ValueError:
-                    currency = CurrencyCode.LKR
-
-        # Use ORM to create the listing so SQLAlchemy handles enum serialisation
-        listing = Listing(
-            destination_id=destination.id,
-            vendor_id=vendor_id,
-            listing_type=ListingType.HOTEL,
-            title=payload.name,
-            description=payload.description,
-            latitude=float(payload.latitude) if payload.latitude else None,
-            longitude=float(payload.longitude) if payload.longitude else None,
-            # ListingStatus.SUBMITTED maps to 'SUBMITTED' in the DB enum
-            status=ListingStatus.SUBMITTED,
-            base_currency=currency,
-            is_active=True,
-        )
-        self.db.add(listing)
-        self.db.flush()  # Assigns listing.id without committing
-        return listing
-
-    def archive_for_vendor(self, vendor_id: UUID, property_id: UUID, reason: str = None) -> StayProperty | None:
-        """Archive (soft delete) a stay property for a vendor"""
-        # First verify ownership and get existing property
-        existing_property = self.get_for_vendor(vendor_id, property_id)
-        if not existing_property:
-            return None
-        
-        # Check if property can be archived
-        if existing_property.status == StayStatus.ARCHIVED:
-            raise ValueError("Stay property is already archived")
-        
-        # Perform soft delete
-        existing_property.status = StayStatus.ARCHIVED
-        existing_property.is_active = False
-        existing_property.archived_at = self.db.execute("SELECT NOW()").scalar()
-        existing_property.archived_by_id = vendor_id
-        if reason:
-            # Store archive reason in metadata if column doesn't exist
-            metadata = existing_property.metadata_json or {}
-            metadata['archive_reason'] = reason
-            existing_property.metadata_json = metadata
-        
-        self.db.commit()
-        return existing_property
-
-    def delete_for_vendor(self, vendor_id: UUID, property_id: UUID) -> StayProperty | None:
-        """Delete a stay property for a vendor (hard delete - use with caution)"""
-        # First verify ownership and get existing property
-        existing_property = self.get_for_vendor(vendor_id, property_id)
-        if not existing_property:
-            return None
-        
-        # Only allow hard delete for DRAFT status
-        if existing_property.status != StayStatus.DRAFT:
-            raise ValueError("Only DRAFT stay properties can be permanently deleted")
-        
+    @staticmethod
+    def _coerce_currency(value: str | CurrencyCode | None) -> CurrencyCode:
+        if isinstance(value, CurrencyCode):
+            return value
         try:
-            # Delete related records first
-            self.db.query(StayRoomUnit).filter(StayRoomUnit.property_id == property_id).delete()
-            self.db.query(StayRoomType).filter(StayRoomType.property_id == property_id).delete()
-            self.db.query(StayPropertyAmenityMap).filter(StayPropertyAmenityMap.property_id == property_id).delete()
-            
-            # Delete the main property
-            self.db.delete(existing_property)
-            self.db.commit()
-            return existing_property
-        except Exception as e:
-            self.db.rollback()
-            raise e
-
-    def _get_or_create_destination(self, payload: StayPropertyCreate) -> Destination:
-        """Get or create destination from stay payload"""
-        # Use city as destination name, fallback to district or address
-        destination_name = payload.city or payload.district or payload.address
-        
-        if not destination_name:
-            # Default destination if none provided
-            destination_name = "Sri Lanka"
-        
-        # Try to find existing destination
-        destination = (
-            self.db.query(Destination)
-            .filter(Destination.name == destination_name)
-            .first()
-        )
-        
-        if not destination:
-            # Create new destination
-            destination = Destination(
-                name=destination_name,
-                destination_type=DestinationType.CITY,  # Default type
-            )
-            self.db.add(destination)
-            self.db.flush()  # Get destination ID
-        
-        return destination
+            return CurrencyCode(value or CurrencyCode.LKR.value)
+        except ValueError:
+            return CurrencyCode.LKR

@@ -23,6 +23,7 @@ class StayRoomTypeInput(BaseModel):
     floor: str | None = None
     size: str | None = None
     size_unit: str | None = Field(default=None, alias="sizeUnit")
+    # WEEK 1 FIX: Accept int from frontend but store as string in DB (conversion handled in repository)
     max_guests: int | None = Field(default=None, alias="maxGuests", ge=1)
     base_price: Decimal | None = Field(default=None, alias="basePrice", ge=0, json_schema_extra={"format": "decimal"})
     currency: str = "LKR"

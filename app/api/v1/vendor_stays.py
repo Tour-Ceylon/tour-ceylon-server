@@ -54,7 +54,16 @@ async def create_stay_property(
     repo: StayRepository = Depends(get_stay_repository),
 ):
     try:
-        return repo.create_for_vendor(current_user.id, payload)
+        created_stay = repo.create_for_vendor(current_user.id, payload)
+        
+        # MANDATORY VALIDATION: Ensure listing_id was assigned
+        if created_stay.listing_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="CRITICAL ERROR: Stay was created without parent listing"
+            )
+        
+        return created_stay
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except CloudinaryIntegrationError as exc:

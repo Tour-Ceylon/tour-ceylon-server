@@ -11,8 +11,22 @@ from app.config.database import engine
 import app.models
 from app.models.base import Base
 
-# Create tables on startup
-Base.metadata.create_all(bind=engine)
+
+logger = logging.getLogger(__name__)
+
+
+# Create tables on startup for the configured PostgreSQL database.
+try:
+    from app.config.database import DATABASE_URL
+
+    if DATABASE_URL.startswith("sqlite"):
+        raise ValueError("SQLite is disabled for this app. Use the pre-production PostgreSQL DATABASE_URL.")
+
+    Base.metadata.create_all(bind=engine)
+    print("Database tables created successfully")
+except Exception as e:
+    print(f"Database table creation skipped: {e}")
+    print("Application will continue but some features may be limited")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -65,7 +79,16 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 app.add_exception_handler(AdminAPIError, admin_api_error_handler)
 
-# Add CORS middleware
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled error while processing %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
+
+# Add CORS middleware (permissive for development)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -74,12 +97,12 @@ app.add_middleware(
         "http://localhost:5173",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:3001",
-        "http://localhost:5173",
         "http://127.0.0.1:5173",
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 app.include_router(api_router, prefix="/api/v1")

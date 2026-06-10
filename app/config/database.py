@@ -17,17 +17,18 @@ load_dotenv(ENV_PATH)
 dotenv_values_map = dotenv_values(ENV_PATH)
 database_url = os.getenv("DATABASE_URL")
 
-# Keep explicit SQLite overrides for tests, but prefer the project .env for the app.
-if not database_url or not database_url.startswith("sqlite"):
-    database_url = dotenv_values_map.get("DATABASE_URL") or database_url
-    if database_url:
-        os.environ["DATABASE_URL"] = database_url
+database_url = dotenv_values_map.get("DATABASE_URL") or database_url
+if database_url:
+    os.environ["DATABASE_URL"] = database_url
 
 # Get database URL from environment variables
 DATABASE_URL = database_url
 
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable is not set")
+
+if DATABASE_URL.startswith("sqlite"):
+    raise ValueError("SQLite DATABASE_URL is disabled. Configure the pre-production PostgreSQL database.")
 
 
 def _mask_database_url(url: str) -> str:
@@ -50,16 +51,13 @@ engine_kwargs: dict[str, object] = {
     "echo": False,
 }
 
-if DATABASE_URL.startswith("sqlite"):
-    engine_kwargs["connect_args"] = {"check_same_thread": False}
-else:
-    engine_kwargs.update(
-        {
-            "pool_recycle": 3600,
-            "pool_size": 10,
-            "max_overflow": 20,
-        }
-    )
+engine_kwargs.update(
+    {
+        "pool_recycle": 3600,
+        "pool_size": 10,
+        "max_overflow": 20,
+    }
+)
 
 engine = create_engine(DATABASE_URL, **engine_kwargs)
 

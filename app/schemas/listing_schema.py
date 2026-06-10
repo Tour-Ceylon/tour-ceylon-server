@@ -440,6 +440,7 @@ class ListingVariantResponse(BaseModel):
 class ListingBase(CoordinateMixin):
     listing_type: ListingType
     destination_id: UUID
+    vendor_id: UUID | None = None
     title: str
     slug: str | None = None
     description: str | None = None
@@ -509,6 +510,7 @@ class ListingCreate(ListingBase):
 class ListingUpdate(CoordinateMixin):
     listing_type: ListingType | None = None
     destination_id: UUID | None = None
+    vendor_id: UUID | None = None
     title: str | None = None
     slug: str | None = None
     description: str | None = None
@@ -567,6 +569,7 @@ class ListingResponse(BaseModel):
     id: UUID
     listing_type: ListingType
     destination_id: UUID
+    vendor_id: UUID | None = None
     title: str
     slug: str | None = None
     description: str | None = None
