@@ -10,6 +10,7 @@ from app.schemas.transport_schema import (
     TransportBookingCreate,
     TransportBookingResponse,
     VehicleCategoryResponse,
+    TransportLocationSuggestion,
     TransportBookingDetailResponse
 )
 
@@ -25,6 +26,18 @@ async def list_active_vehicle_categories(
     Get all active vehicle categories for transport.
     """
     return service.list_active_categories()
+
+@router.get("/locations/search", response_model=List[TransportLocationSuggestion])
+async def search_transport_locations(
+    q: str,
+    service: TransportService = Depends(get_transport_service)
+):
+    """
+    Search live Sri Lanka pickup/dropoff locations through Geoapify.
+    """
+    if len(q.strip()) < 2:
+        return []
+    return await service.search_locations(q)
 
 @router.post("/quote", response_model=TransportEstimateResponse)
 async def get_transport_quote(

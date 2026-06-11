@@ -42,6 +42,8 @@ class VehicleCategoryUpdate(BaseModel):
 
 class VehicleCategoryResponse(VehicleCategoryBase):
     id: UUID
+    is_active: bool
+    sort_order: int | None = None
 
     class Config:
         from_attributes = True
@@ -52,6 +54,19 @@ class TransportEstimateRequest(BaseModel):
     destination_location: str
     travel_date: date
     pickup_time: time
+    pickup_lat: Optional[Decimal] = None
+    pickup_lng: Optional[Decimal] = None
+    destination_lat: Optional[Decimal] = None
+    destination_lng: Optional[Decimal] = None
+
+class TransportLocationSuggestion(BaseModel):
+    label: str
+    lat: float
+    lng: float
+    place_id: Optional[str] = None
+    city: Optional[str] = None
+    district: Optional[str] = None
+    country: Optional[str] = None
 
 class VehicleEstimate(BaseModel):
     category_id: UUID

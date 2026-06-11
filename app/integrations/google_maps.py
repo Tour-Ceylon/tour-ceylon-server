@@ -22,7 +22,7 @@ class GoogleMapsService:
         }
 
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.get(self.base_url, params=params)
                 data = response.json()
 
