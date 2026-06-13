@@ -27,7 +27,9 @@ class ListingType(str, Enum):
 
 class ListingStatus(str, Enum):
     DRAFT = "draft"
+    SUBMITTED = "submitted"
     PUBLISHED = "published"
+    REJECTED = "rejected"
     ARCHIVED = "archived"
 
 

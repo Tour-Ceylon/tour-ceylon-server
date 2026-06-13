@@ -3,11 +3,15 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.models.enum import BookingUnit, CurrencyCode, DestinationType, MediaType, PropertyType, SafariType, TransferLocationType
+from app.models.enum import BookingUnit, CurrencyCode, DestinationType, ListingStatus, MediaType, PropertyType, SafariType, TransferLocationType
 from app.schemas.media_schema import MediaAssetPublicResponse, MediaSummary
 
 
 AdminListingCategory = Literal["stay", "tour", "safari", "experience", "transfer"]
+
+
+class ListingStatusUpdateRequest(BaseModel):
+    status: ListingStatus
 
 
 class CoordinateMixin(BaseModel):
@@ -251,6 +255,9 @@ class AdminListingBase(CoordinateMixin):
     title: str
     description: str | None = None
     is_active: bool = Field(default=True, alias="isActive")
+    status: str = "draft"
+    created_at: str | None = Field(default=None, alias="createdAt")
+    updated_at: str | None = Field(default=None, alias="updatedAt")
     media: list[AdminListingMedia] = Field(default_factory=list)
     variants: list[ListingVariantAdminInput] = Field(default_factory=list)
 

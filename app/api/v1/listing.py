@@ -61,15 +61,16 @@ async def get_listings(
     db: Session = Depends(get_db),
     listing_repo: ListingRepository = Depends(get_listing_repository)
 ):
-    """Get all listings with pagination"""
-    
-    listings = listing_repo.get_all(skip=skip, limit=limit, is_active=is_active)
-    if is_active is None:
-        total = listing_repo.count_active() + listing_repo.count_inactive()
-    elif is_active:
-        total = listing_repo.count_active()
-    else:
-        total = listing_repo.count_inactive()
+    """Get public listings with pagination."""
+
+    page = skip // limit + 1
+    search_params = ListingSearchParams(
+        status=ListingStatus.PUBLISHED,
+        is_active=True,
+        page=page,
+        per_page=limit,
+    )
+    listings, total = listing_repo.search(search_params)
     
     return ListingListResponse(
         listings=listings,
@@ -85,10 +86,10 @@ async def get_listing(
     listing_id: UUID,
     listing_repo: ListingRepository = Depends(get_listing_repository),
 ):
-    """Get listing by ID"""
+    """Get published public listing by ID"""
 
     listing = listing_repo.get_by_id(listing_id)
-    if not listing:
+    if not listing or listing.status != ListingStatus.PUBLISHED or listing.is_active is not True:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Listing not found"
@@ -122,8 +123,8 @@ async def search_listings_get(
         location=location,
         title=title,
         base_currency=base_currency,
-        status=status,
-        is_active=is_active,
+        status=ListingStatus.PUBLISHED,
+        is_active=True,
         start_date=start_date,
         end_date=end_date,
         adults=adults,
@@ -150,8 +151,10 @@ async def search_listings(
     db: Session = Depends(get_db),
     listing_repo: ListingRepository = Depends(get_listing_repository)
 ):
-    """Search listings with filters (POST)"""
-    
+    """Search public listings with filters (POST)"""
+
+    search_params.status = ListingStatus.PUBLISHED
+    search_params.is_active = True
     listings, total_count = listing_repo.search(search_params)
     
     return ListingListResponse(
@@ -387,7 +390,7 @@ async def get_listing_by_slug(
     """Get listing by slug"""
 
     listing = listing_repo.get_by_slug(slug)
-    if not listing:
+    if not listing or listing.status != ListingStatus.PUBLISHED or listing.is_active is not True:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Listing not found"
@@ -402,10 +405,10 @@ async def get_listing(
     db: Session = Depends(get_db),
     listing_repo: ListingRepository = Depends(get_listing_repository)
 ):
-    """Get listing by ID"""
+    """Get published public listing by ID"""
 
     listing = listing_repo.get_by_id(listing_id)
-    if not listing:
+    if not listing or listing.status != ListingStatus.PUBLISHED or listing.is_active is not True:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Listing not found"

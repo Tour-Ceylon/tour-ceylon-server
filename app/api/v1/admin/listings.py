@@ -11,6 +11,7 @@ from app.schemas.admin.listings import (
     ExperienceListingCreate,
     ExperienceListingResponse,
     ListingUpdateRequest,
+    ListingStatusUpdateRequest,
     AdminListingCategory,
     StayListingCreate,
     StayListingResponse,
@@ -112,6 +113,20 @@ async def create_transfer_listing(
     service: AdminDashboardService = Depends(get_admin_service),
 ):
     return service.create_listing("transfer", payload.model_dump(by_alias=False))
+
+
+@router.patch(
+    "/{category}/{listing_id}/status",
+    response_model=AdminListingResponse,
+    response_model_by_alias=True,
+)
+async def update_listing_status(
+    category: AdminListingCategory,
+    listing_id: UUID,
+    payload: ListingStatusUpdateRequest,
+    service: AdminDashboardService = Depends(get_admin_service),
+):
+    return service.update_listing_status(category, listing_id, payload.status)
 
 
 @router.patch(
