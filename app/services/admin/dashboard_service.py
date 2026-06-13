@@ -36,9 +36,9 @@ class AdminDashboardService:
         self.settings = AdminSettingsRepository(db)
         self.listings = AdminDashboardListingRepository(db)
 
-    def get_snapshot(self) -> dict:
+    def get_snapshot(self, current_user) -> dict:
         listing_groups = {"stay": [], "tour": [], "safari": [], "experience": [], "transfer": []}
-        for listing in self.listings.get_all_listings():
+        for listing in self.listings.get_all_listings(current_user):
             category = self.CATEGORY_BY_LISTING_TYPE.get(listing.listing_type)
             if category in listing_groups:
                 listing_groups[category].append(self._build_listing_response(listing))

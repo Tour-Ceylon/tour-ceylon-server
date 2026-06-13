@@ -52,6 +52,20 @@ class StayRepository:
         property_data = self._property_model_data(data, vendor_id)
 
         try:
+            temp_property = StayProperty(**property_data)
+            destination = self._get_or_create_destination(temp_property)
+
+            listing = Listing(
+                destination_id=destination.id,
+                listing_type=ListingType.HOTEL,
+                title=temp_property.name,
+                vendor_id=vendor_id,
+                status=ListingStatus.SUBMITTED
+            )
+            self.db.add(listing)
+            self.db.flush()
+
+            property_data["listing_id"] = listing.id
             db_property = StayProperty(**property_data)
             self.db.add(db_property)
             self.db.flush()
@@ -59,6 +73,7 @@ class StayRepository:
             self._replace_children(db_property, data)
 
             self._ensure_listing_projection(db_property)
+            assert db_property.listing_id is not None, "stay_property.listing_id should not be None"
             self.db.commit()
         except Exception:
             self.db.rollback()
@@ -319,16 +334,27 @@ class StayRepository:
         base_currency = self._currency_from_room(first_room)
         listing = self.db.get(Listing, property_record.listing_id) if property_record.listing_id else None
 
+        status_map = {
+            "submitted": ListingStatus.SUBMITTED,
+            "approved": ListingStatus.PUBLISHED,
+            "published": ListingStatus.PUBLISHED,
+            "rejected": ListingStatus.REJECTED,
+            "archived": ListingStatus.ARCHIVED,
+            "draft": ListingStatus.DRAFT,
+        }
+        mapped_status = status_map.get(property_record.status, ListingStatus.DRAFT)
+
         listing_payload = {
             "destination_id": destination.id,
             "listing_type": ListingType.HOTEL,
+            "vendor_id": property_record.vendor_id,
             "title": property_record.name,
             "description": property_record.description,
             "latitude": float(property_record.latitude) if property_record.latitude is not None else None,
             "longitude": float(property_record.longitude) if property_record.longitude is not None else None,
-            "status": ListingStatus.PUBLISHED if property_record.status in {"submitted", "approved", "published"} else ListingStatus.DRAFT,
+            "status": mapped_status,
             "base_currency": base_currency,
-            "is_active": property_record.status not in {"archived", "rejected", "draft"},
+            "is_active": mapped_status == ListingStatus.PUBLISHED,
         }
         if listing is None:
             listing = Listing(**listing_payload)

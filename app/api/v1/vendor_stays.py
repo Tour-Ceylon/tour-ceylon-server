@@ -28,6 +28,8 @@ def require_stay_vendor(current_user: User = Depends(get_current_user)) -> User:
         return current_user
     if role != UserRole.VENDOR.value:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only vendors or admins can manage stay applications")
+    if current_user.vendor_status != "approved":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Vendor is not approved")
     if "Stay" not in categories:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Vendor is not approved for Stay listings")
     return current_user
