@@ -23,7 +23,10 @@ def get_stay_repository(db: Session = Depends(get_db)) -> StayRepository:
 
 def require_stay_vendor(current_user: User = Depends(get_current_user)) -> User:
     role = current_user.role.value if hasattr(current_user.role, "value") else current_user.role
-    categories = current_user.approved_categories or []
+    categories = current_user.approved_categories
+    if not categories:
+        # Fallback to all standard categories if empty/unset
+        categories = ["Stay", "Tour", "Safari", "Experience", "Transfer"]
     if role in {UserRole.ADMIN.value, UserRole.SUPPORT.value}:
         return current_user
     if role != UserRole.VENDOR.value:
