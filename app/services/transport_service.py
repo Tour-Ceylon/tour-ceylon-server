@@ -1,3 +1,4 @@
+import os
 import random
 import string
 from datetime import datetime
@@ -6,10 +7,14 @@ from typing import List, Optional
 from uuid import UUID
 from sqlalchemy.orm import Session
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 
+from app.models.transportRoute import TransportRoute
 from app.models.vehicleCategory import VehicleCategory
 from app.models.transportBooking import TransportBooking
+from app.integrations.geoapify import geoapify_routing_service
 from app.integrations.google_maps import google_maps_service
+from app.integrations.local_distance import estimate_distance_matrix
 from app.schemas.transport_schema import (
     TransportEstimateRequest,
     TransportEstimateResponse,
@@ -23,11 +28,55 @@ class TransportService:
         self.db = db
 
     async def get_estimates(self, request: TransportEstimateRequest) -> TransportEstimateResponse:
-        # 1. Get distance and duration from Google Maps
-        distance_info = await google_maps_service.get_distance_matrix(
-            request.pickup_location, 
-            request.destination_location
+        origin_coordinates = self._request_coordinates(
+            request.pickup_lat,
+            request.pickup_lng,
         )
+        destination_coordinates = self._request_coordinates(
+            request.destination_lat,
+            request.destination_lng,
+        )
+
+        # 1. Get distance and duration from the cheapest hosted routing provider first.
+        distance_info = None
+        if origin_coordinates and destination_coordinates:
+            distance_info = self._get_cached_route(
+                request.pickup_location,
+                request.destination_location,
+                origin_coordinates,
+                destination_coordinates,
+            )
+
+            if not distance_info:
+                distance_info = await geoapify_routing_service.get_route_by_coordinates(
+                    origin_coordinates,
+                    destination_coordinates,
+                )
+                self._cache_route(
+                    request.pickup_location,
+                    request.destination_location,
+                    origin_coordinates,
+                    destination_coordinates,
+                    distance_info,
+                )
+
+        if not distance_info:
+            distance_info = await geoapify_routing_service.get_distance_matrix(
+                request.pickup_location,
+                request.destination_location
+            )
+
+        if not distance_info and os.getenv("GOOGLE_MAPS_FALLBACK", "").lower() == "true":
+            distance_info = await google_maps_service.get_distance_matrix(
+                request.pickup_location,
+                request.destination_location
+            )
+
+        if not distance_info:
+            distance_info = estimate_distance_matrix(
+                request.pickup_location,
+                request.destination_location
+            )
         
         if not distance_info:
             raise ValueError("Could not calculate distance between locations")
@@ -75,6 +124,9 @@ class TransportService:
             duration_minutes=distance_info["duration_minutes"],
             estimates=estimates
         )
+
+    async def search_locations(self, query: str):
+        return await geoapify_routing_service.search_locations(query)
 
     def create_booking(self, booking_data: TransportBookingCreate, user_id: Optional[str] = None) -> TransportBooking:
         # Generate unique booking reference
@@ -129,6 +181,77 @@ class TransportService:
         timestamp = datetime.now().strftime("%Y%m%d")
         random_str = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
         return f"TR-{timestamp}-{random_str}"
+
+    def _request_coordinates(
+        self,
+        lat: Optional[Decimal],
+        lng: Optional[Decimal],
+    ) -> Optional[tuple[float, float]]:
+        if lat is None or lng is None:
+            return None
+        return float(lat), float(lng)
+
+    def _get_cached_route(
+        self,
+        pickup_name: str,
+        destination_name: str,
+        pickup: tuple[float, float],
+        destination: tuple[float, float],
+    ) -> Optional[dict]:
+        try:
+            route = self.db.execute(
+                select(TransportRoute)
+                .filter(
+                    TransportRoute.pickup_place_name == pickup_name,
+                    TransportRoute.destination_place_name == destination_name,
+                    TransportRoute.pickup_lat == Decimal(str(round(pickup[0], 6))),
+                    TransportRoute.pickup_lng == Decimal(str(round(pickup[1], 6))),
+                    TransportRoute.destination_lat == Decimal(str(round(destination[0], 6))),
+                    TransportRoute.destination_lng == Decimal(str(round(destination[1], 6))),
+                )
+                .order_by(TransportRoute.updated_at.desc())
+            ).scalars().first()
+        except SQLAlchemyError:
+            self.db.rollback()
+            return None
+
+        if not route or route.distance_km is None or route.estimated_duration_minutes is None:
+            return None
+
+        return {
+            "distance_km": float(route.distance_km),
+            "distance_text": f"{float(route.distance_km):.1f} km",
+            "duration_minutes": route.estimated_duration_minutes,
+            "duration_text": f"{route.estimated_duration_minutes} mins",
+        }
+
+    def _cache_route(
+        self,
+        pickup_name: str,
+        destination_name: str,
+        pickup: tuple[float, float],
+        destination: tuple[float, float],
+        distance_info: Optional[dict],
+    ) -> None:
+        if not distance_info:
+            return
+
+        try:
+            route = TransportRoute(
+                pickup_place_name=pickup_name,
+                destination_place_name=destination_name,
+                pickup_lat=Decimal(str(round(pickup[0], 6))),
+                pickup_lng=Decimal(str(round(pickup[1], 6))),
+                destination_lat=Decimal(str(round(destination[0], 6))),
+                destination_lng=Decimal(str(round(destination[1], 6))),
+                distance_km=Decimal(str(round(float(distance_info["distance_km"]), 2))),
+                estimated_duration_minutes=int(distance_info["duration_minutes"]),
+                is_popular_route=False,
+            )
+            self.db.add(route)
+            self.db.commit()
+        except SQLAlchemyError:
+            self.db.rollback()
 
     # --- Category Management (Admin) ---
 

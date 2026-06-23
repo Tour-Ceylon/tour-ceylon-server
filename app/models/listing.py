@@ -28,8 +28,10 @@ class Listing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         nullable=False
     )
     cover_media_id = Column(UUID(as_uuid=True), ForeignKey("media_assets.id"), nullable=True)
+    vendor_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True)
 
     destination = relationship("Destination", back_populates="listings")
+    vendor = relationship("User", foreign_keys=[vendor_id])
     media = relationship(
         "ListingMedia",
         back_populates="listing",

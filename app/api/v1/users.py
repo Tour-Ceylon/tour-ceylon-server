@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 import math
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_current_user_with_sync
 from app.config.database import get_db
 from app.repositories.user_repo import UserRepository
 from app.schemas.user_schema import (
@@ -71,7 +71,7 @@ async def get_me(
 
 @router.post("/sync", response_model=UserResponse)
 async def sync_user(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_with_sync),
 ):
     """Idempotently resolve or auto-provision the authenticated user."""
 

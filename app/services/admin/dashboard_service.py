@@ -6,8 +6,9 @@ from sqlalchemy.orm import Session
 
 from app.api.errors import AdminAPIError
 from app.models.destination import Destination
-from app.models.enum import BookingUnit, CurrencyCode, ListingType
+from app.models.enum import BookingUnit, CurrencyCode, ListingStatus, ListingType
 from app.models.listing import Listing
+from app.models.stay import StayProperty
 from app.repositories.admin.addon_repo import AdminAddonRepository
 from app.repositories.admin.destination_repo import AdminDestinationRepository
 from app.repositories.admin.listing_repo import AdminDashboardListingRepository
@@ -35,9 +36,9 @@ class AdminDashboardService:
         self.settings = AdminSettingsRepository(db)
         self.listings = AdminDashboardListingRepository(db)
 
-    def get_snapshot(self) -> dict:
+    def get_snapshot(self, current_user) -> dict:
         listing_groups = {"stay": [], "tour": [], "safari": [], "experience": [], "transfer": []}
-        for listing in self.listings.get_all_listings():
+        for listing in self.listings.get_all_listings(current_user):
             category = self.CATEGORY_BY_LISTING_TYPE.get(listing.listing_type)
             if category in listing_groups:
                 listing_groups[category].append(self._build_listing_response(listing))
@@ -48,6 +49,12 @@ class AdminDashboardService:
             "settings": self.get_settings(),
             "listings": listing_groups,
         }
+
+    def get_listings(self, category: str, current_user) -> list[dict]:
+        category = self._validate_category(category)
+        listing_type = self.LISTING_TYPE_MAP[category]
+        listings = self.listings.get_listings_by_type(listing_type, current_user)
+        return [self._build_listing_response(listing) for listing in listings]
 
     def get_destinations(self) -> list[dict]:
         return [
@@ -121,13 +128,48 @@ class AdminDashboardService:
             raise self._not_found("Listing not found")
         return self._build_listing_response(updated)
 
+    def update_listing_status(self, category: str, listing_id: UUID, listing_status: ListingStatus) -> dict:
+        category = self._validate_category(category)
+        listing = self.listings.get_listing(listing_id)
+        if listing is None or listing.listing_type != self.LISTING_TYPE_MAP[category]:
+            raise self._not_found("Listing not found")
+
+        listing.status = listing_status
+        listing.is_active = listing_status == ListingStatus.PUBLISHED
+
+        if listing.listing_type == ListingType.HOTEL:
+            stay_status = {
+                ListingStatus.DRAFT: "draft",
+                ListingStatus.SUBMITTED: "submitted",
+                ListingStatus.PUBLISHED: "approved",
+                ListingStatus.REJECTED: "rejected",
+                ListingStatus.ARCHIVED: "archived",
+            }[listing_status]
+            (
+                self.db.query(StayProperty)
+                .filter(StayProperty.listing_id == listing.id)
+                .update({"status": stay_status}, synchronize_session=False)
+            )
+
+        self.db.commit()
+        return self._build_listing_response(self.listings.get_listing(listing.id))
+
     def delete_listing(self, category: str, listing_id: UUID) -> None:
         category = self._validate_category(category)
         listing = self.listings.get_listing(listing_id)
         if listing is None or listing.listing_type != self.LISTING_TYPE_MAP[category]:
             raise self._not_found("Listing not found")
 
-        self.listings.delete_listing(listing_id)
+        if listing.listing_type == ListingType.HOTEL:
+            (
+                self.db.query(StayProperty)
+                .filter(StayProperty.listing_id == listing.id)
+                .update({"listing_id": None}, synchronize_session=False)
+            )
+            self.db.flush()
+
+        if not self.listings.delete_listing(listing_id):
+            raise self._not_found("Listing not found")
 
     def get_settings(self) -> dict:
         settings = self.settings.get_or_create()
@@ -432,6 +474,9 @@ class AdminDashboardService:
             "title": listing.title,
             "description": listing.description,
             "is_active": listing.is_active,
+            "status": getattr(listing.status, "value", listing.status),
+            "created_at": listing.created_at.isoformat() if listing.created_at else None,
+            "updated_at": listing.updated_at.isoformat() if listing.updated_at else None,
             "latitude": listing.latitude,
             "longitude": listing.longitude,
             "from_price": listing.from_price,

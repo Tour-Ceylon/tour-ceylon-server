@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models.activityDetail import ActivityDetail
 from app.models.destination import Destination
-from app.models.enum import BookingUnit, CurrencyCode, ListingType, PricingRuleType
+from app.models.enum import BookingUnit, CurrencyCode, ListingStatus, ListingType, PricingRuleType
 from app.models.hotelDetail import HotelDetail
 from app.models.listing import Listing
 from app.models.listingMedia import ListingMedia
@@ -240,10 +240,22 @@ class ListingRepository:
         return self.get_by_id(db_listing.id)
 
     def get_by_type(self, listing_type: ListingType) -> list[Listing]:
-        return self._base_query().filter(Listing.listing_type == listing_type).all()
+        return (
+            self._base_query()
+            .filter(
+                Listing.listing_type == listing_type,
+                Listing.status == ListingStatus.PUBLISHED,
+                Listing.is_active.is_(True),
+            )
+            .all()
+        )
 
     def get_active(self) -> list[Listing]:
-        return self._base_query().filter(Listing.is_active.is_(True)).all()
+        return (
+            self._base_query()
+            .filter(Listing.status == ListingStatus.PUBLISHED, Listing.is_active.is_(True))
+            .all()
+        )
 
     def get_inactive(self) -> list[Listing]:
         return self._base_query().filter(Listing.is_active.is_(False)).all()
@@ -252,7 +264,11 @@ class ListingRepository:
         return (
             self._base_query()
             .join(Listing.destination)
-            .filter(Destination.name.ilike(f"%{city}%"))
+            .filter(
+                Destination.name.ilike(f"%{city}%"),
+                Listing.status == ListingStatus.PUBLISHED,
+                Listing.is_active.is_(True),
+            )
             .all()
         )
 
@@ -260,12 +276,24 @@ class ListingRepository:
         return (
             self._base_query()
             .join(Listing.destination)
-            .filter(Destination.name.ilike(f"%{district}%"))
+            .filter(
+                Destination.name.ilike(f"%{district}%"),
+                Listing.status == ListingStatus.PUBLISHED,
+                Listing.is_active.is_(True),
+            )
             .all()
         )
 
     def get_by_currency(self, currency: CurrencyCode) -> list[Listing]:
-        return self._base_query().filter(Listing.base_currency == currency).all()
+        return (
+            self._base_query()
+            .filter(
+                Listing.base_currency == currency,
+                Listing.status == ListingStatus.PUBLISHED,
+                Listing.is_active.is_(True),
+            )
+            .all()
+        )
 
     def count_by_type(self) -> dict:
         results = (
@@ -315,6 +343,8 @@ class ListingRepository:
                     Listing.longitude.between(longitude - lng_diff, longitude + lng_diff),
                     Listing.latitude.is_not(None),
                     Listing.longitude.is_not(None),
+                    Listing.status == ListingStatus.PUBLISHED,
+                    Listing.is_active.is_(True),
                 )
             )
             .all()
