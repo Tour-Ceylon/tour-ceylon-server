@@ -50,6 +50,12 @@ class AdminDashboardService:
             "listings": listing_groups,
         }
 
+    def get_listings(self, category: str, current_user) -> list[dict]:
+        category = self._validate_category(category)
+        listing_type = self.LISTING_TYPE_MAP[category]
+        listings = self.listings.get_listings_by_type(listing_type, current_user)
+        return [self._build_listing_response(listing) for listing in listings]
+
     def get_destinations(self) -> list[dict]:
         return [
             {

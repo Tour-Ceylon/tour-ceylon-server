@@ -45,6 +45,13 @@ class AdminDashboardListingRepository:
             query = query.filter(Listing.vendor_id == current_user.id)
         return query.order_by(Listing.created_at.desc()).all()
 
+    def get_listings_by_type(self, listing_type, current_user) -> list[Listing]:
+        query = self._base_query().filter(Listing.listing_type == listing_type)
+        role = current_user.role.value if hasattr(current_user.role, "value") else current_user.role
+        if role == UserRole.VENDOR.value:
+            query = query.filter(Listing.vendor_id == current_user.id)
+        return query.order_by(Listing.created_at.desc()).all()
+
     def update_listing(self, listing_id: UUID, updates: dict) -> Listing | None:
         listing = self.listing_repo.update(listing_id, ListingUpdate.model_validate(updates))
         return self.get_listing(listing_id) if listing is not None else None
