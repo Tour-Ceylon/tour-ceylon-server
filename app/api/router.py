@@ -8,6 +8,7 @@ from app.api.v1 import (
     listing,
     bookings,
     booking_inquiries,
+    booking_inquiries as booking_inquiries_module,
     wishlist,
     guest_reviews,
     review_metrics,
@@ -15,6 +16,7 @@ from app.api.v1 import (
     includes,
     transport,
     vendor_stays,
+    notifications,
 )
 
 api_router = APIRouter()
@@ -63,6 +65,18 @@ api_router.include_router(
 )
 
 api_router.include_router(
+    booking_inquiries_module.admin_router,
+    prefix="/admin/booking-inquiries",
+    tags=["admin-booking-inquiries"]
+)
+
+api_router.include_router(
+    booking_inquiries_module.vendor_router,
+    prefix="/vendor/booking-inquiries",
+    tags=["vendor-booking-inquiries"]
+)
+
+api_router.include_router(
     wishlist.router,
     prefix="/wishlist",
     tags=["wishlist"]
@@ -102,4 +116,10 @@ api_router.include_router(
     vendor_stays.router,
     prefix="/vendor/stays",
     tags=["vendor-stays"]
+)
+
+api_router.include_router(
+    notifications.router,
+    prefix="/notifications",
+    tags=["notifications"]
 )

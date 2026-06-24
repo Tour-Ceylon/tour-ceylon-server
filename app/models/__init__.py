@@ -33,6 +33,7 @@ from app.models.transportRoute import TransportRoute
 from app.models.transportBooking import TransportBooking
 from app.models.user import User
 from app.models.wishlist import Wishlist
+from app.models.notification import ClientNotification, NotificationType
 
 __all__ = [
     "ActivityDetail",
@@ -47,12 +48,14 @@ __all__ = [
     "BookingStatusHistory",
     "BookingTraveler",
     "CancellationPolicy",
+    "ClientNotification",
     "Destination",
     "HotelDetail",
     "Listing",
     "ListingMedia",
     "ListingVariant",
     "MediaAsset",
+    "NotificationType",
     "PaymentTransaction",
     "Package",
     "PackageAddOn",

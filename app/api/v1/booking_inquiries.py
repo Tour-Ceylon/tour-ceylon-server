@@ -1,26 +1,36 @@
-from typing import List
+from typing import List, Optional
 from uuid import UUID
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db
+from app.api.deps import get_db, get_current_user, require_role
 from app.core.logging import logger
-from app.models.enum import InquiryStatus
+from app.models.enum import InquiryStatus, UserRole
+from app.models.user import User
 from app.schemas.booking_inquiry_schema import (
     BookingInquiryCreate,
     BookingInquiryResponse,
     BookingInquiryDetailed,
     BookingInquiryListResponse,
     BookingInquirySearchParams,
-    BookingInquiryUpdate
+    BookingInquiryUpdate,
+    AdminBookingInquiryItem,
+    AdminBookingInquiryPaginatedResponse,
+    VendorBookingInquiryPaginatedResponse,
+    UpdateInquiryStatusPayload,
 )
 from app.services.booking_inquiry_service import get_booking_inquiry_service
 from app.integrations.email_provider import email_provider
 
 router = APIRouter()
+
+# Separate routers for admin and vendor to avoid static/dynamic route conflicts
+admin_router = APIRouter()
+vendor_router = APIRouter()
 
 
 def send_inquiry_notification_email(inquiry: BookingInquiryDetailed):
@@ -333,3 +343,220 @@ def get_inquiry_statistics(db: Session = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve statistics"
         )
+
+
+# ---------------------------------------------------------------------------
+# Admin router – requires ADMIN or SUPPORT role
+# ---------------------------------------------------------------------------
+
+@admin_router.get(
+    "/",
+    response_model=AdminBookingInquiryPaginatedResponse,
+    summary="List all booking inquiries (admin)",
+)
+def admin_list_booking_inquiries(
+    status_filter: Optional[InquiryStatus] = None,
+    search: Optional[str] = None,
+    page: int = 1,
+    per_page: int = 20,
+    created_from: Optional[datetime] = None,
+    created_to: Optional[datetime] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.SUPPORT])),
+):
+    """
+    Authenticated endpoint for admin/support to list all booking inquiries
+    with pagination, status filters, search, date range, status counts and metrics.
+    """
+    try:
+        service = get_booking_inquiry_service(db)
+        result = service.list_admin_inquiries(
+            status=status_filter,
+            search=search,
+            page=page,
+            per_page=per_page,
+            created_from=created_from,
+            created_to=created_to,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error listing admin booking inquiries: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to list booking inquiries",
+        )
+
+
+@admin_router.patch(
+    "/{inquiry_id}/status",
+    response_model=AdminBookingInquiryItem,
+    summary="Update booking inquiry status (admin)",
+)
+def admin_update_inquiry_status(
+    inquiry_id: UUID,
+    payload: UpdateInquiryStatusPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.SUPPORT])),
+):
+    """
+    Admin/support endpoint to update a booking inquiry status.
+    Allowed transitions: contacted, quoted, converted_to_booking, cancelled.
+
+    TODO: trigger PDF/email confirmation after converted_to_booking.
+    """
+    try:
+        service = get_booking_inquiry_service(db)
+        db_inquiry = service.repository.get_by_id(inquiry_id)
+        if not db_inquiry:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Booking inquiry not found",
+            )
+
+        updated = service.update_inquiry_status(inquiry_id, payload.status)
+        if not updated:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Booking inquiry not found",
+            )
+
+        logger.info(
+            f"Admin {current_user.email} updated inquiry {inquiry_id} status to {payload.status}"
+        )
+        return service._convert_to_admin_item(service.repository.get_by_id(inquiry_id))
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating admin inquiry status {inquiry_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update inquiry status",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Vendor router – requires VENDOR role (or ADMIN for testing)
+# ---------------------------------------------------------------------------
+
+def _require_vendor_or_admin(current_user: User = Depends(get_current_user)) -> User:
+    """Dependency: allow VENDOR or ADMIN/SUPPORT to access vendor endpoints"""
+    role = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
+    allowed = {UserRole.VENDOR.value, UserRole.ADMIN.value, UserRole.SUPPORT.value}
+    if role not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only vendors or admins can access this endpoint",
+        )
+    return current_user
+
+
+@vendor_router.get(
+    "/",
+    response_model=VendorBookingInquiryPaginatedResponse,
+    summary="List vendor-owned booking inquiries",
+)
+def vendor_list_booking_inquiries(
+    status_filter: Optional[InquiryStatus] = None,
+    search: Optional[str] = None,
+    page: int = 1,
+    per_page: int = 20,
+    vendor_id_override: Optional[UUID] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_require_vendor_or_admin),
+):
+    """
+    Vendor endpoint to list only booking inquiries where at least one cart item
+    listing belongs to the current vendor. Admins can pass vendor_id_override for testing.
+    """
+    try:
+        role = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
+        is_admin = role in {UserRole.ADMIN.value, UserRole.SUPPORT.value}
+
+        # Admins may pass a vendor_id_override for testing; vendors always use their own id
+        effective_vendor_id = vendor_id_override if (is_admin and vendor_id_override) else current_user.id
+
+        service = get_booking_inquiry_service(db)
+        result = service.list_vendor_inquiries(
+            vendor_id=effective_vendor_id,
+            status=status_filter,
+            search=search,
+            page=page,
+            per_page=per_page,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error listing vendor booking inquiries: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to list vendor booking inquiries",
+        )
+
+
+@vendor_router.patch(
+    "/{inquiry_id}/status",
+    response_model=AdminBookingInquiryItem,
+    summary="Update booking inquiry status (vendor – limited)",
+)
+def vendor_update_inquiry_status(
+    inquiry_id: UUID,
+    payload: UpdateInquiryStatusPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_require_vendor_or_admin),
+):
+    """
+    Vendor endpoint to update a booking inquiry status.
+    Vendors may only set: contacted, quoted.
+    converted_to_booking and cancelled are admin-only.
+    """
+    VENDOR_ALLOWED_STATUSES = {InquiryStatus.CONTACTED, InquiryStatus.QUOTED}
+
+    role = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
+    is_admin = role in {UserRole.ADMIN.value, UserRole.SUPPORT.value}
+
+    if not is_admin and payload.status not in VENDOR_ALLOWED_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Vendors may only set status to: {', '.join(s.value for s in VENDOR_ALLOWED_STATUSES)}",
+        )
+
+    try:
+        service = get_booking_inquiry_service(db)
+        db_inquiry = service.repository.get_by_id(inquiry_id)
+        if not db_inquiry:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Booking inquiry not found",
+            )
+
+        # Vendors may only update inquiries that contain their own listings
+        if not is_admin:
+            from app.models.listing import Listing
+            vendor_listing_ids = {
+                str(l_id)
+                for (l_id,) in db.query(Listing.id).filter(Listing.vendor_id == current_user.id).all()
+            }
+            has_matching = any(
+                (dict(item).get("listing_id") or dict(item).get("listingId")) in vendor_listing_ids
+                for item in db_inquiry.cart_items
+            )
+            if not has_matching:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Inquiry does not belong to your listings",
+                )
+
+        service.update_inquiry_status(inquiry_id, payload.status)
+        logger.info(
+            f"Vendor {current_user.email} updated inquiry {inquiry_id} status to {payload.status}"
+        )
+        return service._convert_to_admin_item(service.repository.get_by_id(inquiry_id))
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating vendor inquiry status {inquiry_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update inquiry status",
+        )

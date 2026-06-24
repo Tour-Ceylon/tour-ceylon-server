@@ -42,4 +42,5 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         back_populates="changed_by_user",
         foreign_keys="BookingStatusHistory.changed_by_user_id",
     )
+    notifications = relationship("ClientNotification", back_populates="user")
 

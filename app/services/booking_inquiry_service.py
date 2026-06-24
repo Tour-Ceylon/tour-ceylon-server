@@ -16,7 +16,13 @@ from app.schemas.booking_inquiry_schema import (
     BookingInquiryListResponse,
     BookingInquirySearchParams,
     BookingInquiryUpdate,
-    CartItemSchema
+    CartItemSchema,
+    AdminBookingInquiryItem,
+    AdminBookingInquiryCustomer,
+    AdminBookingInquiryStatusCounts,
+    AdminBookingInquiryMetrics,
+    AdminBookingInquiryPaginatedResponse,
+    VendorBookingInquiryPaginatedResponse
 )
 
 
@@ -126,11 +132,39 @@ class BookingInquiryService:
     def update_inquiry_status(self, inquiry_id: UUID, status: InquiryStatus) -> Optional[BookingInquiryDetailed]:
         """Update inquiry status"""
         try:
+            # Get the old inquiry first for logging
+            old_inquiry = self.repository.get_by_id(inquiry_id)
+            old_status = old_inquiry.status if old_inquiry else None
+            
             db_inquiry = self.repository.update_status(inquiry_id, status)
             if not db_inquiry:
+                logger.warning(f"Booking inquiry not found for status update: {inquiry_id}")
                 return None
                 
-            logger.info(f"Updated inquiry {db_inquiry.reference} status to {status}")
+            logger.info(f"Booking inquiry status changed", extra={
+                "inquiry_id": str(inquiry_id),
+                "inquiry_reference": db_inquiry.reference,
+                "old_status": old_status.value if old_status else None,
+                "new_status": status.value,
+                "inquiry_email": db_inquiry.email
+            })
+            
+            # Create client notification for status changes
+            try:
+                logger.info(f"Creating client notification for inquiry reference={db_inquiry.reference} email={db_inquiry.email}")
+                from app.services.notification_service import get_notification_service
+                notification_service = get_notification_service(self.db)
+                notification = notification_service.create_booking_status_notification(db_inquiry, status.value)
+                
+                if notification:
+                    logger.info(f"Successfully created notification id={notification.id} for inquiry {db_inquiry.reference}")
+                else:
+                    logger.warning(f"Notification creation returned None for inquiry {db_inquiry.reference} status {status.value}")
+                    
+            except Exception as e:
+                # Don't fail status update if notification creation fails
+                logger.error(f"Failed to create notification for inquiry {db_inquiry.reference}: {str(e)}", exc_info=True)
+            
             return self._convert_to_detailed_response(db_inquiry)
             
         except Exception as e:
@@ -250,6 +284,228 @@ class BookingInquiryService:
             status=db_inquiry.status,
             created_at=db_inquiry.created_at,
             updated_at=db_inquiry.updated_at
+        )
+
+    def _convert_to_admin_item(self, db_inquiry: BookingInquiry) -> AdminBookingInquiryItem:
+        """Convert database model to admin-shaped detailed item schema"""
+        listing_ids = []
+        for item in db_inquiry.cart_items:
+            item_dict = dict(item)
+            l_id = item_dict.get('listing_id') or item_dict.get('listingId')
+            if l_id:
+                listing_ids.append(l_id)
+                
+        # Query listings
+        from app.models.listing import Listing
+        from app.models.user import User
+        from app.models.enum import ListingType
+        
+        listings_db = []
+        if listing_ids:
+            uuid_list = []
+            for l_id in listing_ids:
+                try:
+                    uuid_list.append(UUID(str(l_id)))
+                except ValueError:
+                    pass
+            if uuid_list:
+                listings_db = self.db.query(Listing).filter(Listing.id.in_(uuid_list)).all()
+                
+        listing_map = {str(l.id): l for l in listings_db}
+        
+        vendor_ids = []
+        vendor_names = []
+        derived_type = "Booking"
+        
+        LISTING_TYPE_TO_BOOKING_TYPE = {
+            ListingType.HOTEL: "Stay",
+            ListingType.TOUR: "Tour",
+            ListingType.SAFARI: "Safari",
+            ListingType.EXPERIENCE: "Experience",
+            ListingType.TRANSFER: "Transfer"
+        }
+        
+        for l_id in listing_ids:
+            l_str = str(l_id)
+            if l_str in listing_map:
+                listing = listing_map[l_str]
+                if listing.vendor_id:
+                    v_id = listing.vendor_id
+                    if v_id not in vendor_ids:
+                        vendor_ids.append(v_id)
+                        vendor_user = self.db.query(User).filter(User.id == v_id).first()
+                        if vendor_user:
+                            v_name = vendor_user.company_name or vendor_user.full_name or "Vendor"
+                            if v_name not in vendor_names:
+                                vendor_names.append(v_name)
+                                
+                if derived_type == "Booking" and listing.listing_type:
+                    derived_type = LISTING_TYPE_TO_BOOKING_TYPE.get(listing.listing_type, "Booking")
+                    
+        if not vendor_names:
+            vendor_names = ["Unassigned"]
+            
+        first_travel_date = datetime.utcnow()
+        if db_inquiry.cart_items:
+            first_item = dict(db_inquiry.cart_items[0])
+            travel_date_str = first_item.get('travel_date') or first_item.get('travelDate')
+            if travel_date_str:
+                if isinstance(travel_date_str, datetime):
+                    first_travel_date = travel_date_str
+                else:
+                    try:
+                        first_travel_date = datetime.fromisoformat(str(travel_date_str).replace('Z', '+00:00'))
+                    except ValueError:
+                        pass
+                        
+        first_title = ""
+        if db_inquiry.cart_items:
+            first_title = dict(db_inquiry.cart_items[0]).get('title', '')
+            
+        cart_items_schema = []
+        for item in db_inquiry.cart_items:
+            item_dict = dict(item)
+            t_date = item_dict.get('travel_date') or item_dict.get('travelDate')
+            t_count = item_dict.get('travel_count') or item_dict.get('travelCount')
+            b_curr = item_dict.get('base_currency') or item_dict.get('baseCurrency') or 'USD'
+            l_id = item_dict.get('listing_id') or item_dict.get('listingId')
+            
+            if isinstance(t_date, str):
+                try:
+                    t_date = datetime.fromisoformat(t_date.replace('Z', '+00:00'))
+                except ValueError:
+                    t_date = datetime.utcnow()
+            elif not isinstance(t_date, datetime):
+                t_date = datetime.utcnow()
+                
+            cart_items_schema.append(CartItemSchema(
+                listingId=str(l_id),
+                title=item_dict.get('title', ''),
+                travelDate=t_date,
+                travelCount=int(t_count) if t_count else 1,
+                price=Decimal(str(item_dict.get('price', 0))),
+                baseCurrency=b_curr
+            ))
+            
+        customer_name = f"{db_inquiry.first_name} {db_inquiry.last_name}"
+        
+        return AdminBookingInquiryItem(
+            id=db_inquiry.id,
+            reference=db_inquiry.reference,
+            status=db_inquiry.status,
+            customer=AdminBookingInquiryCustomer(
+                name=customer_name,
+                email=db_inquiry.email,
+                phone=db_inquiry.phone,
+                nationality=db_inquiry.nationality,
+                emergencyContact=db_inquiry.emergency_contact
+            ),
+            listingSummary=first_title,
+            listings=cart_items_schema,
+            listingIds=[str(lid) for lid in listing_ids],
+            type=derived_type,
+            vendorIds=vendor_ids,
+            vendorNames=vendor_names,
+            travelDate=first_travel_date,
+            guests=db_inquiry.number_of_travelers,
+            numberOfTravelers=db_inquiry.number_of_travelers,
+            subtotal=db_inquiry.subtotal,
+            total=db_inquiry.total,
+            currency=db_inquiry.currency,
+            specialRequests=db_inquiry.special_requests,
+            createdAt=db_inquiry.created_at,
+            updatedAt=db_inquiry.updated_at
+        )
+
+    def list_admin_inquiries(
+        self,
+        status: Optional[InquiryStatus] = None,
+        search: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 20,
+        created_from: Optional[datetime] = None,
+        created_to: Optional[datetime] = None
+    ) -> AdminBookingInquiryPaginatedResponse:
+        """Search and list booking inquiries for admins, including metrics and status counts"""
+        from sqlalchemy import func
+        from app.models.bookingInquiry import BookingInquiry
+        
+        inquiries, total_count = self.repository.search_admin(
+            status=status,
+            search=search,
+            page=page,
+            per_page=per_page,
+            created_from=created_from,
+            created_to=created_to
+        )
+        
+        items = [self._convert_to_admin_item(inq) for inq in inquiries]
+        total_pages = (total_count + per_page - 1) // per_page if per_page > 0 else 0
+        
+        status_counts_db = self.repository.count_by_status()
+        all_count = sum(status_counts_db.values())
+        
+        status_counts = AdminBookingInquiryStatusCounts(
+            all=all_count,
+            pending_contact=status_counts_db.get(InquiryStatus.PENDING_CONTACT, 0),
+            contacted=status_counts_db.get(InquiryStatus.CONTACTED, 0),
+            quoted=status_counts_db.get(InquiryStatus.QUOTED, 0),
+            converted_to_booking=status_counts_db.get(InquiryStatus.CONVERTED_TO_BOOKING, 0),
+            cancelled=status_counts_db.get(InquiryStatus.CANCELLED, 0)
+        )
+        
+        total_value = self.db.query(func.sum(BookingInquiry.total)).scalar() or Decimal('0')
+        pending_value = self.db.query(func.sum(BookingInquiry.total)).filter(
+            BookingInquiry.status.in_([
+                InquiryStatus.PENDING_CONTACT,
+                InquiryStatus.CONTACTED,
+                InquiryStatus.QUOTED
+            ])
+        ).scalar() or Decimal('0')
+        
+        metrics = AdminBookingInquiryMetrics(
+            totalValue=total_value,
+            pendingValue=pending_value,
+            confirmedOrConvertedCount=status_counts_db.get(InquiryStatus.CONVERTED_TO_BOOKING, 0),
+            cancelledCount=status_counts_db.get(InquiryStatus.CANCELLED, 0)
+        )
+        
+        return AdminBookingInquiryPaginatedResponse(
+            items=items,
+            total=total_count,
+            page=page,
+            perPage=per_page,
+            totalPages=total_pages,
+            statusCounts=status_counts,
+            metrics=metrics
+        )
+
+    def list_vendor_inquiries(
+        self,
+        vendor_id: UUID,
+        status: Optional[InquiryStatus] = None,
+        search: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 20
+    ) -> VendorBookingInquiryPaginatedResponse:
+        """Search and list booking inquiries related to vendor owned listings"""
+        inquiries, total_count = self.repository.get_vendor_inquiries(
+            vendor_id=vendor_id,
+            status=status,
+            search=search,
+            page=page,
+            per_page=per_page
+        )
+        
+        items = [self._convert_to_admin_item(inq) for inq in inquiries]
+        total_pages = (total_count + per_page - 1) // per_page if per_page > 0 else 0
+        
+        return VendorBookingInquiryPaginatedResponse(
+            items=items,
+            total=total_count,
+            page=page,
+            perPage=per_page,
+            totalPages=total_pages
         )
 
 
