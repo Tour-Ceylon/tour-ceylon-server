@@ -100,3 +100,101 @@ class BookingInquirySearchParams(BaseModel):
     nationality: str | None = None
     page: int = Field(1, ge=1)
     per_page: int = Field(20, ge=1, le=100)
+
+
+class AdminBookingInquiryCustomer(BaseModel):
+    """Customer schema inside AdminBookingInquiryItem"""
+    name: str
+    email: EmailStr
+    phone: str
+    nationality: str
+    emergency_contact: str | None = Field(None, alias="emergencyContact")
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        from_attributes=True
+    )
+
+
+class AdminBookingInquiryItem(BaseModel):
+    """Admin/vendor friendly booking inquiry response item"""
+    id: UUID
+    reference: str
+    status: InquiryStatus
+    customer: AdminBookingInquiryCustomer
+    listing_summary: str = Field(..., alias="listingSummary")
+    listings: list[CartItemSchema]
+    listing_ids: list[str] = Field(..., alias="listingIds")
+    type: str  # derived from listing/listing_type when possible, e.g. "Stay", "Tour", etc.
+    vendor_ids: list[UUID] = Field(..., alias="vendorIds")
+    vendor_names: list[str] = Field(..., alias="vendorNames")
+    travel_date: datetime = Field(..., alias="travelDate")
+    guests: int  # maps to numberOfTravelers
+    number_of_travelers: int = Field(..., alias="numberOfTravelers")
+    subtotal: Decimal
+    total: Decimal
+    currency: CurrencyCode
+    special_requests: str | None = Field(None, alias="specialRequests")
+    created_at: datetime = Field(..., alias="createdAt")
+    updated_at: datetime = Field(..., alias="updatedAt")
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        populate_by_name=True,
+        json_encoders={
+            datetime: lambda v: v.isoformat(),
+            Decimal: lambda v: float(v),
+            UUID: lambda v: str(v)
+        }
+    )
+
+
+class AdminBookingInquiryStatusCounts(BaseModel):
+    """Statistics count grouped by status"""
+    all: int
+    pending_contact: int = Field(..., alias="pending_contact")
+    contacted: int
+    quoted: int
+    converted_to_booking: int = Field(..., alias="converted_to_booking")
+    cancelled: int
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class AdminBookingInquiryMetrics(BaseModel):
+    """Metrics calculation for dashboard cards"""
+    total_value: Decimal = Field(..., alias="totalValue")
+    pending_value: Decimal = Field(..., alias="pendingValue")
+    confirmed_or_converted_count: int = Field(..., alias="confirmedOrConvertedCount")
+    cancelled_count: int = Field(..., alias="cancelledCount")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class AdminBookingInquiryPaginatedResponse(BaseModel):
+    """Response structure for admin booking inquiry listing"""
+    items: list[AdminBookingInquiryItem]
+    total: int
+    page: int
+    per_page: int = Field(..., alias="perPage")
+    total_pages: int = Field(..., alias="totalPages")
+    status_counts: AdminBookingInquiryStatusCounts = Field(..., alias="statusCounts")
+    metrics: AdminBookingInquiryMetrics
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class VendorBookingInquiryPaginatedResponse(BaseModel):
+    """Response structure for vendor booking inquiry listing"""
+    items: list[AdminBookingInquiryItem]
+    total: int
+    page: int
+    per_page: int = Field(..., alias="perPage")
+    total_pages: int = Field(..., alias="totalPages")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class UpdateInquiryStatusPayload(BaseModel):
+    """Payload for patching booking inquiry status"""
+    status: InquiryStatus

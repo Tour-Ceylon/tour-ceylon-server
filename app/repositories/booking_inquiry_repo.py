@@ -206,8 +206,131 @@ class BookingInquiryRepository:
             .all()
         )
 
+    def search_admin(
+        self,
+        status: Optional[InquiryStatus] = None,
+        search: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 20,
+        created_from: Optional[datetime] = None,
+        created_to: Optional[datetime] = None
+    ) -> tuple[list[BookingInquiry], int]:
+        """Search booking inquiries for admin with status, date, and keyword filters"""
+        from sqlalchemy import or_, cast, String
+        query = self._base_query()
+        count_query = self.db.query(func.count(BookingInquiry.id))
+
+        filters = []
+
+        if status:
+            filters.append(BookingInquiry.status == status)
+
+        if created_from:
+            filters.append(BookingInquiry.created_at >= created_from)
+
+        if created_to:
+            filters.append(BookingInquiry.created_at <= created_to)
+
+        if search:
+            search_pat = f"%{search}%"
+            filters.append(
+                or_(
+                    BookingInquiry.reference.ilike(search_pat),
+                    BookingInquiry.email.ilike(search_pat),
+                    BookingInquiry.first_name.ilike(search_pat),
+                    BookingInquiry.last_name.ilike(search_pat),
+                    BookingInquiry.phone.ilike(search_pat),
+                    func.concat(BookingInquiry.first_name, " ", BookingInquiry.last_name).ilike(search_pat),
+                    cast(BookingInquiry.cart_items, String).ilike(search_pat)
+                )
+            )
+
+        if filters:
+            criteria = and_(*filters)
+            query = query.filter(criteria)
+            count_query = count_query.filter(criteria)
+
+        total_count = count_query.scalar() or 0
+        skip = (page - 1) * per_page
+        inquiries = (
+            query.order_by(BookingInquiry.created_at.desc())
+            .offset(skip)
+            .limit(per_page)
+            .all()
+        )
+
+        return inquiries, total_count
+
+    def get_vendor_inquiries(
+        self,
+        vendor_id: UUID,
+        status: Optional[InquiryStatus] = None,
+        search: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 20
+    ) -> tuple[list[BookingInquiry], int]:
+        """Filter inquiries belonging to vendor listings, supporting status/keyword search and pagination"""
+        from app.models.listing import Listing
+        
+        # 1. Fetch listing IDs owned by the vendor
+        vendor_listing_ids = [
+            str(l_id) for (l_id,) in self.db.query(Listing.id).filter(Listing.vendor_id == vendor_id).all()
+        ]
+        
+        if not vendor_listing_ids:
+            return [], 0
+            
+        # 2. Query all inquiries matching optional status
+        query = self._base_query()
+        filters = []
+        if status:
+            filters.append(BookingInquiry.status == status)
+            
+        if filters:
+            query = query.filter(and_(*filters))
+            
+        all_inquiries = query.order_by(BookingInquiry.created_at.desc()).all()
+        
+        # 3. Filter in Python to find matching cart items
+        matched_inquiries = []
+        for inquiry in all_inquiries:
+            has_vendor_item = False
+            for item in inquiry.cart_items:
+                item_dict = dict(item)
+                listing_id_val = item_dict.get('listing_id') or item_dict.get('listingId')
+                if listing_id_val and str(listing_id_val) in vendor_listing_ids:
+                    has_vendor_item = True
+                    break
+            
+            if not has_vendor_item:
+                continue
+                
+            # Check search query
+            if search:
+                search_lower = search.lower()
+                customer_name = f"{inquiry.first_name} {inquiry.last_name}".lower()
+                matches_search = (
+                    search_lower in inquiry.reference.lower() or
+                    search_lower in customer_name or
+                    search_lower in inquiry.email.lower() or
+                    any(search_lower in dict(item).get('title', '').lower() for item in inquiry.cart_items)
+                )
+                if not matches_search:
+                    continue
+                    
+            matched_inquiries.append(inquiry)
+            
+        total_count = len(matched_inquiries)
+        
+        # Apply manual pagination
+        skip = (page - 1) * per_page
+        paginated_inquiries = matched_inquiries[skip : skip + per_page]
+        
+        return paginated_inquiries, total_count
+
 
 def get_booking_inquiry_repository(db: Session = None) -> BookingInquiryRepository:
+
     """Get booking inquiry repository instance"""
     if db is None:
         from app.config.database import SessionLocal
