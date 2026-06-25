@@ -106,6 +106,7 @@ class UserSearchParams(BaseModel):
     role: Optional[UserRole] = None
     country: Optional[str] = None
     is_active: Optional[bool] = None
+    vendor_status: Optional[str] = None
     page: int = 1
     per_page: int = 20
 
@@ -123,4 +124,3 @@ class VendorApply(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-

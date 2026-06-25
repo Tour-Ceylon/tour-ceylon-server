@@ -1,10 +1,11 @@
 import builtins
 
-from sqlalchemy import Column, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Column, Date, Enum, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
 from app.models.base import Base, TimestampMixin, UUIDMixin
+from app.models.enum import StayBookingStatus, StayRoomBlockStatus, StayRoomBlockType
 
 
 class StayProperty(Base, UUIDMixin, TimestampMixin):
@@ -42,6 +43,21 @@ class StayProperty(Base, UUIDMixin, TimestampMixin):
     )
     room_units = relationship(
         "StayRoomUnit",
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
+    stay_bookings = relationship(
+        "StayBooking",
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
+    room_blocks = relationship(
+        "StayRoomBlock",
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
+    room_type_calendar_entries = relationship(
+        "StayRoomTypeCalendar",
         back_populates="property",
         cascade="all, delete-orphan",
     )
@@ -123,6 +139,12 @@ class StayRoomType(Base, UUIDMixin, TimestampMixin):
         back_populates="room_type",
         cascade="all, delete-orphan",
     )
+    calendar_entries = relationship(
+        "StayRoomTypeCalendar",
+        back_populates="room_type",
+        cascade="all, delete-orphan",
+    )
+    booking_rooms = relationship("StayBookingRoom", back_populates="room_type")
 
 
 class StayRoomUnit(Base, UUIDMixin, TimestampMixin):
@@ -139,6 +161,8 @@ class StayRoomUnit(Base, UUIDMixin, TimestampMixin):
 
     property = relationship("StayProperty", back_populates="room_units")
     room_type = relationship("StayRoomType", back_populates="room_units")
+    booking_rooms = relationship("StayBookingRoom", back_populates="room_unit")
+    room_blocks = relationship("StayRoomBlock", back_populates="room_unit")
 
 
 class StayRoomProp(Base, UUIDMixin, TimestampMixin):
@@ -166,3 +190,79 @@ class StayRoomPropMap(Base, TimestampMixin):
 
     room = relationship("StayRoomUnit")
     prop = relationship("StayRoomProp", back_populates="room_maps")
+
+
+class StayBooking(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "stay_bookings"
+
+    booking_id = Column(UUID(as_uuid=True), ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False, index=True)
+    property_id = Column(UUID(as_uuid=True), ForeignKey("stay_properties.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(Enum(StayBookingStatus, name="stay_booking_status_enum"), nullable=False, default=StayBookingStatus.PENDING)
+    check_in_date = Column(Date, nullable=False, index=True)
+    check_out_date = Column(Date, nullable=False, index=True)
+    guest_name = Column(String(255), nullable=False)
+    guest_email = Column(String(255), nullable=True)
+    guest_phone = Column(String(80), nullable=True)
+    special_requests = Column(Text, nullable=True)
+    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
+
+    booking = relationship("Booking", back_populates="stay_bookings")
+    property = relationship("StayProperty", back_populates="stay_bookings")
+    rooms = relationship(
+        "StayBookingRoom",
+        back_populates="stay_booking",
+        cascade="all, delete-orphan",
+    )
+
+
+class StayBookingRoom(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "stay_booking_rooms"
+
+    stay_booking_id = Column(UUID(as_uuid=True), ForeignKey("stay_bookings.id", ondelete="CASCADE"), nullable=False, index=True)
+    room_unit_id = Column(UUID(as_uuid=True), ForeignKey("stay_room_units.id", ondelete="RESTRICT"), nullable=False, index=True)
+    room_type_id = Column(UUID(as_uuid=True), ForeignKey("stay_room_types.id", ondelete="RESTRICT"), nullable=False, index=True)
+    check_in_date = Column(Date, nullable=False, index=True)
+    check_out_date = Column(Date, nullable=False, index=True)
+    nightly_rate = Column(Numeric(12, 2), nullable=False)
+    guests = Column(Integer, nullable=False, default=1)
+    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
+
+    stay_booking = relationship("StayBooking", back_populates="rooms")
+    room_unit = relationship("StayRoomUnit", back_populates="booking_rooms")
+    room_type = relationship("StayRoomType", back_populates="booking_rooms")
+
+
+class StayRoomBlock(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "stay_room_blocks"
+
+    property_id = Column(UUID(as_uuid=True), ForeignKey("stay_properties.id", ondelete="CASCADE"), nullable=False, index=True)
+    room_unit_id = Column(UUID(as_uuid=True), ForeignKey("stay_room_units.id", ondelete="CASCADE"), nullable=False, index=True)
+    start_date = Column(Date, nullable=False, index=True)
+    end_date = Column(Date, nullable=False, index=True)
+    block_type = Column(Enum(StayRoomBlockType, name="stay_room_block_type_enum"), nullable=False, default=StayRoomBlockType.MANUAL)
+    status = Column(Enum(StayRoomBlockStatus, name="stay_room_block_status_enum"), nullable=False, default=StayRoomBlockStatus.ACTIVE)
+    reason = Column(Text, nullable=True)
+    blocked_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True)
+    metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
+
+    property = relationship("StayProperty", back_populates="room_blocks")
+    room_unit = relationship("StayRoomUnit", back_populates="room_blocks")
+    blocked_by_user = relationship("User")
+
+
+class StayRoomTypeCalendar(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "stay_room_type_calendar"
+    __table_args__ = (
+        UniqueConstraint("property_id", "room_type_id", "stay_date", name="uq_stay_room_type_calendar_date"),
+    )
+
+    property_id = Column(UUID(as_uuid=True), ForeignKey("stay_properties.id", ondelete="CASCADE"), nullable=False, index=True)
+    room_type_id = Column(UUID(as_uuid=True), ForeignKey("stay_room_types.id", ondelete="CASCADE"), nullable=False, index=True)
+    stay_date = Column(Date, nullable=False, index=True)
+    total_units = Column(Integer, nullable=False, default=0)
+    booked_units = Column(Integer, nullable=False, default=0)
+    blocked_units = Column(Integer, nullable=False, default=0)
+    available_units = Column(Integer, nullable=False, default=0)
+
+    property = relationship("StayProperty", back_populates="room_type_calendar_entries")
+    room_type = relationship("StayRoomType", back_populates="calendar_entries")

@@ -1,3 +1,5 @@
+import logging
+import time as perf_time
 from datetime import time
 from uuid import UUID
 
@@ -27,6 +29,7 @@ class AdminDashboardService:
         "transfer": ListingType.TRANSFER,
     }
     CATEGORY_BY_LISTING_TYPE = {value: key for key, value in LISTING_TYPE_MAP.items()}
+    logger = logging.getLogger("app.admin.dashboard")
 
     def __init__(self, db: Session):
         self.db = db
@@ -37,24 +40,42 @@ class AdminDashboardService:
         self.listings = AdminDashboardListingRepository(db)
 
     def get_snapshot(self, current_user) -> dict:
+        started_at = perf_time.perf_counter()
         listing_groups = {"stay": [], "tour": [], "safari": [], "experience": [], "transfer": []}
         for listing in self.listings.get_all_listings(current_user):
             category = self.CATEGORY_BY_LISTING_TYPE.get(listing.listing_type)
             if category in listing_groups:
                 listing_groups[category].append(self._build_listing_response(listing))
 
-        return {
+        snapshot = {
             "packages": [self._build_package_response(package) for package in self.packages.get_all()],
             "addOns": [self._build_addon_response(addon) for addon in self.addons.get_all()],
             "settings": self.get_settings(),
             "listings": listing_groups,
         }
+        listing_count = sum(len(items) for items in listing_groups.values())
+        self.logger.info(
+            "admin_dashboard.get_snapshot_timing scope=%s listing_count=%s elapsed_ms=%.2f",
+            getattr(current_user, "id", None),
+            listing_count,
+            (perf_time.perf_counter() - started_at) * 1000,
+        )
+        return snapshot
 
     def get_listings(self, category: str, current_user) -> list[dict]:
+        started_at = perf_time.perf_counter()
         category = self._validate_category(category)
         listing_type = self.LISTING_TYPE_MAP[category]
         listings = self.listings.get_listings_by_type(listing_type, current_user)
-        return [self._build_listing_response(listing) for listing in listings]
+        response = [self._build_listing_response(listing) for listing in listings]
+        self.logger.info(
+            "admin_dashboard.get_listings_timing category=%s scope=%s result_count=%s elapsed_ms=%.2f",
+            category,
+            getattr(current_user, "id", None),
+            len(response),
+            (perf_time.perf_counter() - started_at) * 1000,
+        )
+        return response
 
     def get_destinations(self) -> list[dict]:
         return [

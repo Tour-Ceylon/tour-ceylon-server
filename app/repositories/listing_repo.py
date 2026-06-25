@@ -47,7 +47,7 @@ class ListingRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def _base_query(self):
+    def _detail_query(self):
         return self.db.query(Listing).options(
             joinedload(Listing.destination),
             joinedload(Listing.media),
@@ -57,6 +57,19 @@ class ListingRepository:
             joinedload(Listing.safari_detail),
             joinedload(Listing.transfer_detail),
             joinedload(Listing.activity_detail),
+            selectinload(Listing.media_assets),
+            selectinload(Listing.variants).selectinload(ListingVariant.pricing_rules),
+        )
+
+    def _list_query(self):
+        return self.db.query(Listing).options(
+            joinedload(Listing.destination),
+            joinedload(Listing.cover_media),
+            selectinload(Listing.hotel_detail),
+            selectinload(Listing.tour_detail),
+            selectinload(Listing.safari_detail),
+            selectinload(Listing.transfer_detail),
+            selectinload(Listing.activity_detail),
             selectinload(Listing.media_assets),
             selectinload(Listing.variants).selectinload(ListingVariant.pricing_rules),
         )
@@ -78,10 +91,10 @@ class ListingRepository:
         return self.get_by_id(db_listing.id)
 
     def get_by_id(self, listing_id: UUID) -> Optional[Listing]:
-        return self._base_query().filter(Listing.id == listing_id).first()
+        return self._detail_query().filter(Listing.id == listing_id).first()
 
     def get_by_slug(self, slug: str) -> Optional[Listing]:
-        return self._base_query().filter(Listing.slug == slug).first()
+        return self._detail_query().filter(Listing.slug == slug).first()
 
     def get_all(
         self,
@@ -89,7 +102,7 @@ class ListingRepository:
         limit: int = 100,
         is_active: Optional[bool] = None,
     ) -> list[Listing]:
-        query = self._base_query()
+        query = self._list_query()
 
         if is_active is not None:
             query = query.filter(Listing.is_active == is_active)
@@ -97,8 +110,10 @@ class ListingRepository:
         return query.offset(skip).limit(limit).all()
 
     def search(self, search_params: ListingSearchParams) -> tuple[list[Listing], int]:
-        query = self._base_query()
+        query = self.db.query(Listing.id)
         filters = []
+        joined_variants = False
+        joined_location_tables = False
 
         if search_params.listing_type:
             filters.append(Listing.listing_type == search_params.listing_type)
@@ -107,23 +122,19 @@ class ListingRepository:
             filters.append(Listing.destination_id == search_params.destination_id)
 
         if search_params.location:
-            # Outer join all possible location-related tables to avoid excluding listings
-            query = query.outerjoin(Listing.destination)\
-                         .outerjoin(Listing.hotel_detail)\
-                         .outerjoin(Listing.safari_detail)\
-                         .outerjoin(Listing.activity_detail)\
-                         .outerjoin(Listing.tour_detail)
-            
+            if not joined_location_tables:
+                query = (
+                    query.outerjoin(Listing.destination)
+                    .outerjoin(Listing.hotel_detail)
+                    .outerjoin(Listing.safari_detail)
+                    .outerjoin(Listing.activity_detail)
+                    .outerjoin(Listing.tour_detail)
+                )
+                joined_location_tables = True
+
             # Split into terms for a smarter "AND" search across multiple fields
             terms = search_params.location.strip().split()
             if terms:
-                # Ensure all tables are outer-joined once for filtering
-                query = query.outerjoin(Listing.destination)\
-                             .outerjoin(Listing.hotel_detail)\
-                             .outerjoin(Listing.safari_detail)\
-                             .outerjoin(Listing.activity_detail)\
-                             .outerjoin(Listing.tour_detail)
-                
                 for term in terms:
                     t_q = f"%{term}%"
                     query = query.filter(
@@ -156,7 +167,9 @@ class ListingRepository:
         # Guest count filter (Adults + Children)
         total_guests = (search_params.adults or 0) + (search_params.children or 0)
         if total_guests > 0:
-            query = query.join(Listing.variants)
+            if not joined_variants:
+                query = query.join(Listing.variants)
+                joined_variants = True
             filters.append(ListingVariant.capacity_max >= total_guests)
 
         # Date range availability filter
@@ -169,12 +182,21 @@ class ListingRepository:
         if filters:
             query = query.filter(and_(*filters))
 
-        # Handle distinct because of joins
-        query = query.distinct()
-
-        total_count = query.count()
         skip = (search_params.page - 1) * search_params.per_page
-        listings = query.offset(skip).limit(search_params.per_page).all()
+        total_count = query.with_entities(func.count(func.distinct(Listing.id))).scalar() or 0
+        paged_ids = [
+            listing_id
+            for (listing_id,) in (
+                query.distinct().offset(skip).limit(search_params.per_page).all()
+            )
+        ]
+
+        if not paged_ids:
+            return [], total_count
+
+        listings = self._list_query().filter(Listing.id.in_(paged_ids)).all()
+        listing_order = {listing_id: index for index, listing_id in enumerate(paged_ids)}
+        listings.sort(key=lambda listing: listing_order.get(listing.id, len(paged_ids)))
         return listings, total_count
 
     def update(self, listing_id: UUID, listing_data: ListingUpdate) -> Optional[Listing]:
@@ -241,7 +263,7 @@ class ListingRepository:
 
     def get_by_type(self, listing_type: ListingType) -> list[Listing]:
         return (
-            self._base_query()
+            self._list_query()
             .filter(
                 Listing.listing_type == listing_type,
                 Listing.status == ListingStatus.PUBLISHED,
@@ -252,17 +274,17 @@ class ListingRepository:
 
     def get_active(self) -> list[Listing]:
         return (
-            self._base_query()
+            self._list_query()
             .filter(Listing.status == ListingStatus.PUBLISHED, Listing.is_active.is_(True))
             .all()
         )
 
     def get_inactive(self) -> list[Listing]:
-        return self._base_query().filter(Listing.is_active.is_(False)).all()
+        return self._list_query().filter(Listing.is_active.is_(False)).all()
 
     def get_by_location_city(self, city: str) -> list[Listing]:
         return (
-            self._base_query()
+            self._list_query()
             .join(Listing.destination)
             .filter(
                 Destination.name.ilike(f"%{city}%"),
@@ -274,7 +296,7 @@ class ListingRepository:
 
     def get_by_location_district(self, district: str) -> list[Listing]:
         return (
-            self._base_query()
+            self._list_query()
             .join(Listing.destination)
             .filter(
                 Destination.name.ilike(f"%{district}%"),
@@ -286,7 +308,7 @@ class ListingRepository:
 
     def get_by_currency(self, currency: CurrencyCode) -> list[Listing]:
         return (
-            self._base_query()
+            self._list_query()
             .filter(
                 Listing.base_currency == currency,
                 Listing.status == ListingStatus.PUBLISHED,
@@ -336,7 +358,7 @@ class ListingRepository:
         lng_diff = radius_km / 111.0
 
         return (
-            self._base_query()
+            self._list_query()
             .filter(
                 and_(
                     Listing.latitude.between(latitude - lat_diff, latitude + lat_diff),

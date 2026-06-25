@@ -3,6 +3,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 import math
+import logging
+import time
 
 from app.api.deps import get_current_user, get_current_user_with_sync
 from app.config.database import get_db
@@ -20,6 +22,7 @@ from app.models.user import User
 from app.core.auth.clerk import sync_user_metadata_to_clerk
 
 router = APIRouter()
+logger = logging.getLogger("app.users")
 
 
 def get_user_repository(db: Session = Depends(get_db)) -> UserRepository:
@@ -163,17 +166,27 @@ async def get_users(
     user_repo: UserRepository = Depends(get_user_repository)
 ):
     """Get all users with pagination"""
-    
+    started_at = time.perf_counter()
     users = user_repo.get_all(skip=skip, limit=limit, is_active=is_active)
-    total = user_repo.count_active_users() if is_active else len(users)
-    
-    return UserListResponse(
+    total = user_repo.count_all(is_active=is_active)
+
+    response = UserListResponse(
         users=users,
         total=total,
         page=skip // limit + 1,
         per_page=limit,
         total_pages=math.ceil(total / limit) if total > 0 else 0
     )
+    logger.info(
+        "users.get_users_timing skip=%s limit=%s is_active=%s result_count=%s total=%s elapsed_ms=%.2f",
+        skip,
+        limit,
+        is_active,
+        len(users),
+        total,
+        (time.perf_counter() - started_at) * 1000,
+    )
+    return response
 
 
 @router.post("/search", response_model=UserListResponse)
@@ -183,16 +196,29 @@ async def search_users(
     user_repo: UserRepository = Depends(get_user_repository)
 ):
     """Search users with filters"""
-    
+    started_at = time.perf_counter()
     users, total_count = user_repo.search(search_params)
-    
-    return UserListResponse(
+
+    response = UserListResponse(
         users=users,
         total=total_count,
         page=search_params.page,
         per_page=search_params.per_page,
         total_pages=math.ceil(total_count / search_params.per_page) if total_count > 0 else 0
     )
+    logger.info(
+        "users.search_users_timing page=%s per_page=%s role=%s is_active=%s vendor_status=%s email_query=%s result_count=%s total=%s elapsed_ms=%.2f",
+        search_params.page,
+        search_params.per_page,
+        search_params.role,
+        search_params.is_active,
+        search_params.vendor_status,
+        bool(search_params.email),
+        len(users),
+        total_count,
+        (time.perf_counter() - started_at) * 1000,
+    )
+    return response
 
 
 @router.put("/{user_id}", response_model=UserResponse)

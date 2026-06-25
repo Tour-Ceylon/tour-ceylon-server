@@ -336,7 +336,7 @@ def _resolve_local_user(db: Session, claims: dict, *, force_clerk_sync: bool = F
         if not should_sync_from_clerk:
             user, sync_action = _apply_user_updates(db, user, subject, email, full_name)
             logger.debug("auth.local_user_fast_path_hit sub=%s user_id=%s", subject, user.id)
-            logger.info(
+            logger.debug(
                 "auth.user_sync_result action=%s user_id=%s clerk_user_id=%s email=%s",
                 sync_action,
                 user.id,
@@ -391,7 +391,8 @@ def _resolve_local_user(db: Session, claims: dict, *, force_clerk_sync: bool = F
             detail="Authenticated user is not linked to a local user record",
         )
 
-    logger.info(
+    log_method = logger.debug if sync_action == "unchanged" else logger.info
+    log_method(
         "auth.user_sync_result action=%s user_id=%s clerk_user_id=%s email=%s",
         sync_action,
         user.id,
@@ -411,8 +412,24 @@ def get_current_user_id(
             detail="Missing Authorization header",
         )
 
+    verify_started_at = time.perf_counter()
     claims = _decode_and_verify_clerk_token(credentials.credentials)
+    verify_elapsed_ms = (time.perf_counter() - verify_started_at) * 1000
+    logger.info(
+        "auth.verify_timing route=get_current_user_id sub=%s elapsed_ms=%.2f",
+        claims.get("sub"),
+        verify_elapsed_ms,
+    )
+
+    resolve_started_at = time.perf_counter()
     user = _resolve_local_user(db=db, claims=claims)
+    resolve_elapsed_ms = (time.perf_counter() - resolve_started_at) * 1000
+    logger.info(
+        "auth.resolve_local_user_timing route=get_current_user_id sub=%s user_id=%s elapsed_ms=%.2f",
+        claims.get("sub"),
+        user.id,
+        resolve_elapsed_ms,
+    )
     return user.id
 
 
@@ -426,8 +443,25 @@ def get_current_user(
             detail="Missing Authorization header",
         )
 
+    verify_started_at = time.perf_counter()
     claims = _decode_and_verify_clerk_token(credentials.credentials)
-    return _resolve_local_user(db=db, claims=claims)
+    verify_elapsed_ms = (time.perf_counter() - verify_started_at) * 1000
+    logger.info(
+        "auth.verify_timing route=get_current_user sub=%s elapsed_ms=%.2f",
+        claims.get("sub"),
+        verify_elapsed_ms,
+    )
+
+    resolve_started_at = time.perf_counter()
+    user = _resolve_local_user(db=db, claims=claims)
+    resolve_elapsed_ms = (time.perf_counter() - resolve_started_at) * 1000
+    logger.info(
+        "auth.resolve_local_user_timing route=get_current_user sub=%s user_id=%s elapsed_ms=%.2f",
+        claims.get("sub"),
+        user.id,
+        resolve_elapsed_ms,
+    )
+    return user
 
 
 def get_current_user_with_sync(
@@ -440,9 +474,25 @@ def get_current_user_with_sync(
             detail="Missing Authorization header",
         )
 
+    verify_started_at = time.perf_counter()
     claims = _decode_and_verify_clerk_token(credentials.credentials)
+    verify_elapsed_ms = (time.perf_counter() - verify_started_at) * 1000
+    logger.info(
+        "auth.verify_timing route=get_current_user_with_sync sub=%s elapsed_ms=%.2f",
+        claims.get("sub"),
+        verify_elapsed_ms,
+    )
     logger.info("auth.explicit_user_sync_requested sub=%s", claims.get("sub"))
-    return _resolve_local_user(db=db, claims=claims, force_clerk_sync=True)
+    resolve_started_at = time.perf_counter()
+    user = _resolve_local_user(db=db, claims=claims, force_clerk_sync=True)
+    resolve_elapsed_ms = (time.perf_counter() - resolve_started_at) * 1000
+    logger.info(
+        "auth.resolve_local_user_timing route=get_current_user_with_sync sub=%s user_id=%s elapsed_ms=%.2f",
+        claims.get("sub"),
+        user.id,
+        resolve_elapsed_ms,
+    )
+    return user
 
 
 @dataclass

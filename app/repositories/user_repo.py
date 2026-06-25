@@ -77,6 +77,9 @@ class UserRepository:
         
         if search_params.is_active is not None:
             filters.append(User.is_active == search_params.is_active)
+
+        if search_params.vendor_status:
+            filters.append(User.vendor_status == search_params.vendor_status)
         
         if filters:
             query = query.filter(and_(*filters))
@@ -157,7 +160,7 @@ class UserRepository:
     def count_active_users(self) -> int:
         """Get count of active users"""
         return self.db.query(User).filter(User.is_active == True).count()
-    
+
     def count_inactive_users(self) -> int:
         """Get count of inactive users"""
         return self.db.query(User).filter(User.is_active == False).count()
@@ -168,8 +171,14 @@ class UserRepository:
         
         if exclude_user_id:
             query = query.filter(User.id != exclude_user_id)
-        
+
         return query.first() is not None
+
+    def count_all(self, is_active: Optional[bool] = None) -> int:
+        query = self.db.query(func.count(User.id))
+        if is_active is not None:
+            query = query.filter(User.is_active == is_active)
+        return query.scalar() or 0
 
 
 # Dependency function to get user repository

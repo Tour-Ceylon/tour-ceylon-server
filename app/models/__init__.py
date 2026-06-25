@@ -18,12 +18,16 @@ from app.models.pricingRule import PricingRule
 from app.models.review import Review
 from app.models.safariDetail import SafariDetail
 from app.models.stay import (
+    StayBooking,
+    StayBookingRoom,
     StayProperty,
     StayPropertyAmenity,
     StayPropertyAmenityMap,
+    StayRoomBlock,
     StayRoomProp,
     StayRoomPropMap,
     StayRoomType,
+    StayRoomTypeCalendar,
     StayRoomUnit,
 )
 from app.models.tourDetail import TourDetail
@@ -59,12 +63,16 @@ __all__ = [
     "PricingRule",
     "Review",
     "SafariDetail",
+    "StayBooking",
+    "StayBookingRoom",
     "StayProperty",
     "StayPropertyAmenity",
     "StayPropertyAmenityMap",
+    "StayRoomBlock",
     "StayRoomProp",
     "StayRoomPropMap",
     "StayRoomType",
+    "StayRoomTypeCalendar",
     "StayRoomUnit",
     "TourDetail",
     "TransferDetail",

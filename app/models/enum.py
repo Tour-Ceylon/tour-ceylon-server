@@ -96,6 +96,23 @@ class AvailabilityStatus(str, Enum):
     BLOCKED = "blocked"
 
 
+class StayBookingStatus(str, Enum):
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    CANCELLED = "cancelled"
+
+
+class StayRoomBlockStatus(str, Enum):
+    ACTIVE = "active"
+    RELEASED = "released"
+
+
+class StayRoomBlockType(str, Enum):
+    MAINTENANCE = "maintenance"
+    MANUAL = "manual"
+    OWNER_HOLD = "owner_hold"
+
+
 class ReviewStatus(str, Enum):
     PUBLISHED = "published"
     HIDDEN = "hidden"

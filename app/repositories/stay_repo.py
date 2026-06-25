@@ -145,6 +145,8 @@ class StayRepository:
     def create_from_listing(self, vendor_id: UUID, listing_id: UUID) -> StayProperty | None:
         existing = self.get_by_id(listing_id)
         if existing is not None:
+            if existing.vendor_id != vendor_id:
+                return None
             return existing
 
         listing = (
@@ -155,7 +157,11 @@ class StayRepository:
                 joinedload(Listing.variants).joinedload(ListingVariant.pricing_rules),
                 joinedload(Listing.media_assets),
             )
-            .filter(Listing.id == listing_id, Listing.listing_type == ListingType.HOTEL)
+            .filter(
+                Listing.id == listing_id,
+                Listing.listing_type == ListingType.HOTEL,
+                Listing.vendor_id == vendor_id,
+            )
             .first()
         )
         if listing is None:
