@@ -14,6 +14,7 @@ from app.api.v1 import (
     rooms,
     includes,
     transport,
+    stays,
     vendor_stays,
 )
 
@@ -96,6 +97,12 @@ api_router.include_router(
     transport.router,
     prefix="/transport",
     tags=["transport"]
+)
+
+api_router.include_router(
+    stays.router,
+    prefix="/stays",
+    tags=["stays"]
 )
 
 api_router.include_router(

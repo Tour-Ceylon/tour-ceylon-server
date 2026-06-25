@@ -15,7 +15,7 @@ class AdminDashboardListingRepository:
         self.db = db
         self.listing_repo = ListingRepository(db)
 
-    def _base_query(self):
+    def _detail_query(self):
         return (
             self.db.query(Listing)
             .options(
@@ -31,22 +31,38 @@ class AdminDashboardListingRepository:
             )
         )
 
+    def _list_query(self):
+        return (
+            self.db.query(Listing)
+            .options(
+                joinedload(Listing.destination),
+                joinedload(Listing.cover_media),
+                joinedload(Listing.hotel_detail),
+                joinedload(Listing.tour_detail),
+                joinedload(Listing.safari_detail),
+                joinedload(Listing.transfer_detail),
+                joinedload(Listing.activity_detail),
+                selectinload(Listing.media_assets),
+                selectinload(Listing.variants).selectinload(ListingVariant.pricing_rules),
+            )
+        )
+
     def create_listing(self, listing_data: dict) -> Listing:
         listing = self.listing_repo.create(ListingCreate.model_validate(listing_data))
         return self.get_listing(listing.id)
 
     def get_listing(self, listing_id: UUID) -> Listing | None:
-        return self._base_query().filter(Listing.id == listing_id).first()
+        return self._detail_query().filter(Listing.id == listing_id).first()
 
     def get_all_listings(self, current_user) -> list[Listing]:
-        query = self._base_query()
+        query = self._list_query()
         role = current_user.role.value if hasattr(current_user.role, "value") else current_user.role
         if role == UserRole.VENDOR.value:
             query = query.filter(Listing.vendor_id == current_user.id)
         return query.order_by(Listing.created_at.desc()).all()
 
     def get_listings_by_type(self, listing_type, current_user) -> list[Listing]:
-        query = self._base_query().filter(Listing.listing_type == listing_type)
+        query = self._list_query().filter(Listing.listing_type == listing_type)
         role = current_user.role.value if hasattr(current_user.role, "value") else current_user.role
         if role == UserRole.VENDOR.value:
             query = query.filter(Listing.vendor_id == current_user.id)
