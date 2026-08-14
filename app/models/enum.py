@@ -2,10 +2,19 @@ from enum import Enum
 
 
 class UserRole(str, Enum):
-    TOURIST = "tourist"
+    TOURIST = "tourist"    # Legacy client-facing default
+    CUSTOMER = "customer"  # Alias for TOURIST (client frontend may use)
+    CLIENT = "client"      # Alias for TOURIST (client frontend may use)
     ADMIN = "admin"
     SUPPORT = "support"
     VENDOR = "vendor"
+
+
+class VendorStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    SUSPENDED = "suspended"
 
 
 class ListingType(str, Enum):
@@ -18,7 +27,9 @@ class ListingType(str, Enum):
 
 class ListingStatus(str, Enum):
     DRAFT = "draft"
+    SUBMITTED = "submitted"
     PUBLISHED = "published"
+    REJECTED = "rejected"
     ARCHIVED = "archived"
 
 
@@ -83,6 +94,23 @@ class AvailabilityStatus(str, Enum):
     LIMITED = "limited"
     SOLD_OUT = "sold_out"
     BLOCKED = "blocked"
+
+
+class StayBookingStatus(str, Enum):
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    CANCELLED = "cancelled"
+
+
+class StayRoomBlockStatus(str, Enum):
+    ACTIVE = "active"
+    RELEASED = "released"
+
+
+class StayRoomBlockType(str, Enum):
+    MAINTENANCE = "maintenance"
+    MANUAL = "manual"
+    OWNER_HOLD = "owner_hold"
 
 
 class ReviewStatus(str, Enum):

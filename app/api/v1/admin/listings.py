@@ -2,6 +2,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status
 
+from app.api.deps import get_current_user
+
 from app.api.errors import AdminAPIError
 from app.api.v1.admin.dependencies import get_admin_service, get_media_service
 from app.models.enum import ListingType, MediaOwnerType
@@ -11,6 +13,7 @@ from app.schemas.admin.listings import (
     ExperienceListingCreate,
     ExperienceListingResponse,
     ListingUpdateRequest,
+    ListingStatusUpdateRequest,
     AdminListingCategory,
     StayListingCreate,
     StayListingResponse,
@@ -22,6 +25,7 @@ from app.schemas.admin.listings import (
 from app.schemas.media_schema import MediaAltTextUpdateRequest, MediaAssetListResponse, MediaPrimaryUpdateRequest, MediaReorderRequest, MediaUploadResponse
 from app.services.admin.dashboard_service import AdminDashboardService
 from app.services.media_service import MediaService
+from app.models.user import User
 
 router = APIRouter(prefix="/listings", tags=["admin-listings"])
 
@@ -112,6 +116,80 @@ async def create_transfer_listing(
     service: AdminDashboardService = Depends(get_admin_service),
 ):
     return service.create_listing("transfer", payload.model_dump(by_alias=False))
+
+
+@router.get(
+    "/stay",
+    response_model=list[StayListingResponse],
+    response_model_by_alias=True,
+)
+async def get_stay_listings(
+    service: AdminDashboardService = Depends(get_admin_service),
+    current_user: User = Depends(get_current_user),
+):
+    return service.get_listings("stay", current_user)
+
+
+@router.get(
+    "/tour",
+    response_model=list[TourListingResponse],
+    response_model_by_alias=True,
+)
+async def get_tour_listings(
+    service: AdminDashboardService = Depends(get_admin_service),
+    current_user: User = Depends(get_current_user),
+):
+    return service.get_listings("tour", current_user)
+
+
+@router.get(
+    "/safari",
+    response_model=list[SafariListingResponse],
+    response_model_by_alias=True,
+)
+async def get_safari_listings(
+    service: AdminDashboardService = Depends(get_admin_service),
+    current_user: User = Depends(get_current_user),
+):
+    return service.get_listings("safari", current_user)
+
+
+@router.get(
+    "/experience",
+    response_model=list[ExperienceListingResponse],
+    response_model_by_alias=True,
+)
+async def get_experience_listings(
+    service: AdminDashboardService = Depends(get_admin_service),
+    current_user: User = Depends(get_current_user),
+):
+    return service.get_listings("experience", current_user)
+
+
+@router.get(
+    "/transfer",
+    response_model=list[TransferListingResponse],
+    response_model_by_alias=True,
+)
+async def get_transfer_listings(
+    service: AdminDashboardService = Depends(get_admin_service),
+    current_user: User = Depends(get_current_user),
+):
+    return service.get_listings("transfer", current_user)
+
+
+@router.patch(
+    "/{category}/{listing_id}/status",
+    response_model=AdminListingResponse,
+    response_model_by_alias=True,
+)
+async def update_listing_status(
+    category: AdminListingCategory,
+    listing_id: UUID,
+    payload: ListingStatusUpdateRequest,
+    service: AdminDashboardService = Depends(get_admin_service),
+):
+    return service.update_listing_status(category, listing_id, payload.status)
 
 
 @router.patch(

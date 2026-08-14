@@ -3,8 +3,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 import math
+import logging
+import time
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_current_user_with_sync
 from app.config.database import get_db
 from app.repositories.user_repo import UserRepository
 from app.schemas.user_schema import (
@@ -12,12 +14,15 @@ from app.schemas.user_schema import (
     UserUpdate, 
     UserResponse, 
     UserListResponse, 
-    UserSearchParams
+    UserSearchParams,
+    VendorApply
 )
 from app.models.enum import UserRole
 from app.models.user import User
+from app.core.auth.clerk import sync_user_metadata_to_clerk
 
 router = APIRouter()
+logger = logging.getLogger("app.users")
 
 
 def get_user_repository(db: Session = Depends(get_db)) -> UserRepository:
@@ -41,6 +46,15 @@ async def create_user(
     
     try:
         user = user_repo.create(user_data)
+        if user and user.clerk_user_id:
+            from app.core.auth.clerk import sync_user_metadata_to_clerk
+            sync_user_metadata_to_clerk(
+                clerk_user_id=user.clerk_user_id,
+                role=user.role.value if hasattr(user.role, "value") else str(user.role),
+                vendor_status=user.vendor_status,
+                approved_categories=user.approved_categories,
+                company_name=user.company_name
+            )
         return user
     except Exception as e:
         raise HTTPException(
@@ -60,11 +74,51 @@ async def get_me(
 
 @router.post("/sync", response_model=UserResponse)
 async def sync_user(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_with_sync),
 ):
     """Idempotently resolve or auto-provision the authenticated user."""
 
     return current_user
+
+
+@router.post("/apply-vendor", response_model=UserResponse)
+async def apply_vendor(
+    vendor_data: VendorApply,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Submit a vendor application for the currently logged-in user."""
+    current_user.role = UserRole.VENDOR
+    current_user.vendor_status = "pending"
+    current_user.company_name = vendor_data.business_name
+    current_user.approved_categories = vendor_data.categories
+    current_user.business_profile = {
+        "phone": vendor_data.phone,
+        "description": vendor_data.business_description
+    }
+
+    try:
+        db.add(current_user)
+        db.commit()
+        db.refresh(current_user)
+        
+        if current_user.clerk_user_id:
+            sync_user_metadata_to_clerk(
+                clerk_user_id=current_user.clerk_user_id,
+                role="vendor",
+                vendor_status="pending",
+                approved_categories=vendor_data.categories,
+                company_name=vendor_data.business_name
+            )
+            
+        return current_user
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to apply as vendor: {str(e)}"
+        )
+
 
 
 @router.get("/{user_id}", response_model=UserResponse)
@@ -112,17 +166,27 @@ async def get_users(
     user_repo: UserRepository = Depends(get_user_repository)
 ):
     """Get all users with pagination"""
-    
+    started_at = time.perf_counter()
     users = user_repo.get_all(skip=skip, limit=limit, is_active=is_active)
-    total = user_repo.count_active_users() if is_active else len(users)
-    
-    return UserListResponse(
+    total = user_repo.count_all(is_active=is_active)
+
+    response = UserListResponse(
         users=users,
         total=total,
         page=skip // limit + 1,
         per_page=limit,
         total_pages=math.ceil(total / limit) if total > 0 else 0
     )
+    logger.info(
+        "users.get_users_timing skip=%s limit=%s is_active=%s result_count=%s total=%s elapsed_ms=%.2f",
+        skip,
+        limit,
+        is_active,
+        len(users),
+        total,
+        (time.perf_counter() - started_at) * 1000,
+    )
+    return response
 
 
 @router.post("/search", response_model=UserListResponse)
@@ -132,16 +196,29 @@ async def search_users(
     user_repo: UserRepository = Depends(get_user_repository)
 ):
     """Search users with filters"""
-    
+    started_at = time.perf_counter()
     users, total_count = user_repo.search(search_params)
-    
-    return UserListResponse(
+
+    response = UserListResponse(
         users=users,
         total=total_count,
         page=search_params.page,
         per_page=search_params.per_page,
         total_pages=math.ceil(total_count / search_params.per_page) if total_count > 0 else 0
     )
+    logger.info(
+        "users.search_users_timing page=%s per_page=%s role=%s is_active=%s vendor_status=%s email_query=%s result_count=%s total=%s elapsed_ms=%.2f",
+        search_params.page,
+        search_params.per_page,
+        search_params.role,
+        search_params.is_active,
+        search_params.vendor_status,
+        bool(search_params.email),
+        len(users),
+        total_count,
+        (time.perf_counter() - started_at) * 1000,
+    )
+    return response
 
 
 @router.put("/{user_id}", response_model=UserResponse)
@@ -170,6 +247,15 @@ async def update_user(
     
     try:
         updated_user = user_repo.update(user_id, user_data)
+        if updated_user and updated_user.clerk_user_id:
+            from app.core.auth.clerk import sync_user_metadata_to_clerk
+            sync_user_metadata_to_clerk(
+                clerk_user_id=updated_user.clerk_user_id,
+                role=updated_user.role.value if hasattr(updated_user.role, "value") else str(updated_user.role),
+                vendor_status=updated_user.vendor_status,
+                approved_categories=updated_user.approved_categories,
+                company_name=updated_user.company_name
+            )
         return updated_user
     except Exception as e:
         raise HTTPException(

@@ -105,6 +105,13 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
     # ---------------------------------------------------
+    # AUTH PERFORMANCE
+    # ---------------------------------------------------
+    AUTH_CLERK_PROFILE_CACHE_TTL_SECONDS: int = 600
+    AUTH_ENABLE_CLERK_FALLBACK_SYNC: bool = True
+    AUTH_SYNC_ON_MISSING_LOCAL_USER_ONLY: bool = True
+
+    # ---------------------------------------------------
     # UTILS
     # ---------------------------------------------------
     def get_cors_origins(self) -> List[str]:

@@ -13,6 +13,9 @@ from app.api.v1 import (
     review_metrics,
     rooms,
     includes,
+    transport,
+    stays,
+    vendor_stays,
 )
 
 api_router = APIRouter()
@@ -88,4 +91,22 @@ api_router.include_router(
     includes.router,
     prefix="/listing-addons",
     tags=["listing-addons"]
+)
+
+api_router.include_router(
+    transport.router,
+    prefix="/transport",
+    tags=["transport"]
+)
+
+api_router.include_router(
+    stays.router,
+    prefix="/stays",
+    tags=["stays"]
+)
+
+api_router.include_router(
+    vendor_stays.router,
+    prefix="/vendor/stays",
+    tags=["vendor-stays"]
 )

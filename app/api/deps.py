@@ -12,7 +12,9 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from app.config.database import get_db
+from app.config.settings import settings
 from app.models.user import User
+from app.models.enum import UserRole
 from app.integrations.supabase_client import build_supabase_access_token
 
 
@@ -23,6 +25,7 @@ bearer_scheme = HTTPBearer(auto_error=False)
 _jwks_cache: dict | None = None
 _jwks_cached_at = 0.0
 _jwks_ttl_seconds = 300
+_clerk_profile_cache: dict[str, tuple[float, dict]] = {}
 
 
 def _clerk_backend_api_url() -> str:
@@ -197,10 +200,33 @@ def _extract_clerk_name(clerk_user: dict) -> str | None:
 
 
 def _fetch_clerk_user(subject: str) -> dict | None:
+    if not settings.AUTH_ENABLE_CLERK_FALLBACK_SYNC:
+        logger.debug("auth.clerk_user_lookup_disabled sub=%s", subject)
+        return None
+
     secret_key = os.getenv("CLERK_SECRET_KEY")
     if not secret_key:
         logger.warning("auth.clerk_secret_missing_for_user_lookup sub=%s", subject)
         return None
+
+    cached_entry = _clerk_profile_cache.get(subject)
+    if cached_entry:
+        cached_at, payload = cached_entry
+        cache_age = time.time() - cached_at
+        if cache_age < settings.AUTH_CLERK_PROFILE_CACHE_TTL_SECONDS:
+            logger.debug(
+                "auth.clerk_user_lookup_cache_hit sub=%s age_seconds=%.2f ttl_seconds=%s",
+                subject,
+                cache_age,
+                settings.AUTH_CLERK_PROFILE_CACHE_TTL_SECONDS,
+            )
+            return payload
+        logger.debug(
+            "auth.clerk_user_lookup_cache_stale sub=%s age_seconds=%.2f ttl_seconds=%s",
+            subject,
+            cache_age,
+            settings.AUTH_CLERK_PROFILE_CACHE_TTL_SECONDS,
+        )
 
     lookup_url = f"{_clerk_backend_api_url()}/users/{subject}"
 
@@ -229,48 +255,16 @@ def _fetch_clerk_user(subject: str) -> dict | None:
         logger.warning("auth.clerk_user_lookup_unexpected_payload sub=%s", subject)
         return None
 
+    _clerk_profile_cache[subject] = (time.time(), payload)
     logger.info("auth.clerk_user_lookup_succeeded sub=%s", subject)
     return payload
 
 
-def _resolve_local_user(db: Session, claims: dict) -> User:
-    email = claims.get("email") or claims.get("email_address")
-    subject = claims.get("sub")
-    full_name = claims.get("name")
-
-    if not subject:
-        logger.warning("auth.token_missing_subject")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication token is missing the required subject claim",
-        )
-
-    sync_action = "unchanged"
-
-    clerk_user = _fetch_clerk_user(subject)
-    if clerk_user:
-        # Prefer Clerk's current primary email to keep local profile in sync.
-        clerk_email = _extract_clerk_email(clerk_user)
-        if clerk_email:
-            email = clerk_email
-
-        full_name = full_name or _extract_clerk_name(clerk_user)
-        logger.info(
-            "auth.user_lookup_enriched_from_clerk sub=%s email_found=%s",
-            subject,
-            bool(email),
-        )
-    elif not email and not os.getenv("CLERK_SECRET_KEY"):
-        logger.error("auth.clerk_secret_missing_for_profile_enrichment sub=%s", subject)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Server auth configuration is incomplete. Set CLERK_SECRET_KEY.",
-        )
-
+def _find_local_user(db: Session, subject: str, email: str | None) -> User | None:
     user = db.query(User).filter(User.clerk_user_id == subject).first()
 
-    if email:
-        user = user or db.query(User).filter(User.email == email).first()
+    if email and user is None:
+        user = db.query(User).filter(User.email == email).first()
 
     if user is None:
         try:
@@ -279,13 +273,19 @@ def _resolve_local_user(db: Session, claims: dict) -> User:
         except ValueError:
             user = None
 
+    return user
+
+
+def _apply_user_updates(db: Session, user: User, subject: str, email: str | None, full_name: str | None) -> tuple[User, str]:
+    sync_action = "unchanged"
     did_update_user = False
-    if user is not None and subject and user.clerk_user_id != subject:
+
+    if subject and user.clerk_user_id != subject:
         user.clerk_user_id = subject
         did_update_user = True
         sync_action = "updated"
 
-    if user is not None and email and user.email != email:
+    if email and user.email != email:
         existing_email_owner = db.query(User).filter(User.email == email, User.id != user.id).first()
         if existing_email_owner:
             sync_action = "conflict"
@@ -300,7 +300,7 @@ def _resolve_local_user(db: Session, claims: dict) -> User:
             did_update_user = True
             sync_action = "updated"
 
-    if user is not None and full_name and user.full_name != full_name:
+    if full_name and user.full_name != full_name:
         user.full_name = full_name
         did_update_user = True
         sync_action = "updated"
@@ -309,6 +309,67 @@ def _resolve_local_user(db: Session, claims: dict) -> User:
         db.add(user)
         db.commit()
         db.refresh(user)
+
+    return user, sync_action
+
+
+def _resolve_local_user(db: Session, claims: dict, *, force_clerk_sync: bool = False) -> User:
+    email = claims.get("email") or claims.get("email_address")
+    subject = claims.get("sub")
+    full_name = claims.get("name")
+
+    if not subject:
+        logger.warning("auth.token_missing_subject")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication token is missing the required subject claim",
+        )
+
+    user = _find_local_user(db, subject, email)
+    should_sync_from_clerk = force_clerk_sync
+
+    if user is not None:
+        has_minimal_profile = bool(user.email) and bool(user.full_name)
+        if not settings.AUTH_SYNC_ON_MISSING_LOCAL_USER_ONLY and not has_minimal_profile:
+            should_sync_from_clerk = True
+
+        if not should_sync_from_clerk:
+            user, sync_action = _apply_user_updates(db, user, subject, email, full_name)
+            logger.debug("auth.local_user_fast_path_hit sub=%s user_id=%s", subject, user.id)
+            logger.debug(
+                "auth.user_sync_result action=%s user_id=%s clerk_user_id=%s email=%s",
+                sync_action,
+                user.id,
+                user.clerk_user_id,
+                user.email,
+            )
+            return user
+
+    if not email and not os.getenv("CLERK_SECRET_KEY") and settings.AUTH_ENABLE_CLERK_FALLBACK_SYNC:
+        logger.error("auth.clerk_secret_missing_for_profile_enrichment sub=%s", subject)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Server auth configuration is incomplete. Set CLERK_SECRET_KEY.",
+        )
+
+    sync_action = "unchanged"
+    clerk_user = _fetch_clerk_user(subject)
+    if clerk_user:
+        clerk_email = _extract_clerk_email(clerk_user)
+        if clerk_email:
+            email = clerk_email
+
+        full_name = full_name or _extract_clerk_name(clerk_user)
+        logger.info(
+            "auth.user_lookup_enriched_from_clerk sub=%s email_found=%s",
+            subject,
+            bool(email),
+        )
+        if user is None:
+            user = _find_local_user(db, subject, email)
+
+    if user is not None:
+        user, sync_action = _apply_user_updates(db, user, subject, email, full_name)
 
     if user is None and email:
         user = User(clerk_user_id=subject, email=email, full_name=full_name, is_active=True)
@@ -330,7 +391,8 @@ def _resolve_local_user(db: Session, claims: dict) -> User:
             detail="Authenticated user is not linked to a local user record",
         )
 
-    logger.info(
+    log_method = logger.debug if sync_action == "unchanged" else logger.info
+    log_method(
         "auth.user_sync_result action=%s user_id=%s clerk_user_id=%s email=%s",
         sync_action,
         user.id,
@@ -350,8 +412,24 @@ def get_current_user_id(
             detail="Missing Authorization header",
         )
 
+    verify_started_at = time.perf_counter()
     claims = _decode_and_verify_clerk_token(credentials.credentials)
+    verify_elapsed_ms = (time.perf_counter() - verify_started_at) * 1000
+    logger.info(
+        "auth.verify_timing route=get_current_user_id sub=%s elapsed_ms=%.2f",
+        claims.get("sub"),
+        verify_elapsed_ms,
+    )
+
+    resolve_started_at = time.perf_counter()
     user = _resolve_local_user(db=db, claims=claims)
+    resolve_elapsed_ms = (time.perf_counter() - resolve_started_at) * 1000
+    logger.info(
+        "auth.resolve_local_user_timing route=get_current_user_id sub=%s user_id=%s elapsed_ms=%.2f",
+        claims.get("sub"),
+        user.id,
+        resolve_elapsed_ms,
+    )
     return user.id
 
 
@@ -365,8 +443,56 @@ def get_current_user(
             detail="Missing Authorization header",
         )
 
+    verify_started_at = time.perf_counter()
     claims = _decode_and_verify_clerk_token(credentials.credentials)
-    return _resolve_local_user(db=db, claims=claims)
+    verify_elapsed_ms = (time.perf_counter() - verify_started_at) * 1000
+    logger.info(
+        "auth.verify_timing route=get_current_user sub=%s elapsed_ms=%.2f",
+        claims.get("sub"),
+        verify_elapsed_ms,
+    )
+
+    resolve_started_at = time.perf_counter()
+    user = _resolve_local_user(db=db, claims=claims)
+    resolve_elapsed_ms = (time.perf_counter() - resolve_started_at) * 1000
+    logger.info(
+        "auth.resolve_local_user_timing route=get_current_user sub=%s user_id=%s elapsed_ms=%.2f",
+        claims.get("sub"),
+        user.id,
+        resolve_elapsed_ms,
+    )
+    return user
+
+
+def get_current_user_with_sync(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User:
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing Authorization header",
+        )
+
+    verify_started_at = time.perf_counter()
+    claims = _decode_and_verify_clerk_token(credentials.credentials)
+    verify_elapsed_ms = (time.perf_counter() - verify_started_at) * 1000
+    logger.info(
+        "auth.verify_timing route=get_current_user_with_sync sub=%s elapsed_ms=%.2f",
+        claims.get("sub"),
+        verify_elapsed_ms,
+    )
+    logger.info("auth.explicit_user_sync_requested sub=%s", claims.get("sub"))
+    resolve_started_at = time.perf_counter()
+    user = _resolve_local_user(db=db, claims=claims, force_clerk_sync=True)
+    resolve_elapsed_ms = (time.perf_counter() - resolve_started_at) * 1000
+    logger.info(
+        "auth.resolve_local_user_timing route=get_current_user_with_sync sub=%s user_id=%s elapsed_ms=%.2f",
+        claims.get("sub"),
+        user.id,
+        resolve_elapsed_ms,
+    )
+    return user
 
 
 @dataclass
@@ -406,3 +532,58 @@ def get_auth_context(
         supabase_access_token=supabase_access_token,
         clerk_claims=claims,
     )
+
+
+# Reusable database-backed guards
+
+def require_role(allowed_roles: list[UserRole] | list[str]):
+    """
+    Dependency factory to enforce user role using the DB user as the source of truth.
+    Supports TOURIST/CUSTOMER/CLIENT aliases.
+    """
+    normalized_allowed = set()
+    for role in allowed_roles:
+        val = role.value if isinstance(role, UserRole) else str(role)
+        val = val.strip().lower()
+        normalized_allowed.add(val)
+        # Add aliases
+        if val in ("tourist", "customer", "client"):
+            normalized_allowed.update(["tourist", "customer", "client"])
+
+    def dependency(current_user: User = Depends(get_current_user)) -> User:
+        user_role = current_user.role.value if isinstance(current_user.role, UserRole) else str(current_user.role)
+        user_role = user_role.strip().lower()
+        if user_role not in normalized_allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: User role not authorized",
+            )
+        return current_user
+
+    return dependency
+
+
+def require_vendor_status(required_status: str):
+    """
+    Dependency factory to enforce a specific vendor status for Vendor users.
+    """
+    def dependency(current_user: User = Depends(get_current_user)) -> User:
+        if current_user.role != UserRole.VENDOR:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: User is not a vendor",
+            )
+        if current_user.vendor_status != required_status:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Vendor status is '{current_user.vendor_status}', but '{required_status}' is required",
+            )
+        return current_user
+
+    return dependency
+
+
+# Aliases matching camelCase and pythonic naming
+requireAuth = get_current_user
+requireRole = require_role
+requireVendorStatus = require_vendor_status
