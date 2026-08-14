@@ -8,6 +8,7 @@ from app.api.errors import AdminAPIError, admin_api_error_handler
 from app.config.database import engine
 import app.models
 from app.models.base import Base
+from app.config.settings import settings
 
 # Create tables on startup
 Base.metadata.create_all(bind=engine)
@@ -23,15 +24,7 @@ app.add_exception_handler(AdminAPIError, admin_api_error_handler)
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:5173",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=settings.get_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
