@@ -160,11 +160,11 @@ class AdminDashboardService:
 
         if listing.listing_type == ListingType.HOTEL:
             stay_status = {
-                ListingStatus.DRAFT: "draft",
-                ListingStatus.SUBMITTED: "submitted",
-                ListingStatus.PUBLISHED: "approved",
-                ListingStatus.REJECTED: "rejected",
-                ListingStatus.ARCHIVED: "archived",
+                ListingStatus.DRAFT: "DRAFT",
+                ListingStatus.SUBMITTED: "SUBMITTED",
+                ListingStatus.PUBLISHED: "APPROVED",
+                ListingStatus.REJECTED: "REJECTED",
+                ListingStatus.ARCHIVED: "ARCHIVED",
             }[listing_status]
             (
                 self.db.query(StayProperty)

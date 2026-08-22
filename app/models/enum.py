@@ -26,11 +26,19 @@ class ListingType(str, Enum):
 
 
 class ListingStatus(str, Enum):
-    DRAFT = "draft"
-    SUBMITTED = "submitted"
-    PUBLISHED = "published"
-    REJECTED = "rejected"
-    ARCHIVED = "archived"
+    DRAFT = "DRAFT"
+    SUBMITTED = "SUBMITTED"
+    PUBLISHED = "PUBLISHED"
+    REJECTED = "REJECTED"
+    ARCHIVED = "ARCHIVED"
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            for member in cls:
+                if member.value.upper() == value.upper():
+                    return member
+        return None
 
 
 class CurrencyCode(str, Enum):
