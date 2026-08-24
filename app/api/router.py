@@ -16,6 +16,7 @@ from app.api.v1 import (
     transport,
     stays,
     vendor_stays,
+    notifications,
 )
 
 api_router = APIRouter()
@@ -109,4 +110,10 @@ api_router.include_router(
     vendor_stays.router,
     prefix="/vendor/stays",
     tags=["vendor-stays"]
+)
+
+api_router.include_router(
+    notifications.router,
+    prefix="/notifications",
+    tags=["notifications"]
 )

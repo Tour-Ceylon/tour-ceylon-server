@@ -2,7 +2,7 @@ from sqlalchemy import Column, String, ForeignKey, UUID, Numeric, DateTime, Enum
 from sqlalchemy.orm import relationship
 
 from app.models.base import Base, UUIDMixin, TimestampMixin
-from app.models.enum import CurrencyCode, PaymentTransactionStatus, BookingStatus
+from app.models.enum import CurrencyCode, PaymentTransactionStatus, BookingStatus, PaymentMethod
 
 
 class Booking(Base, UUIDMixin, TimestampMixin):
@@ -22,6 +22,8 @@ class Booking(Base, UUIDMixin, TimestampMixin):
     total_amount = Column(Numeric(10, 2), nullable=False)
 
     currency = Column(Enum(CurrencyCode, name="currency_code_enum"), nullable=False, default=CurrencyCode.USD)
+
+    payment_method = Column(Enum(PaymentMethod, name="payment_method_enum"), nullable=False, default=PaymentMethod.PAY_AT_PROPERTY)
 
     payment_status = Column(Enum(PaymentTransactionStatus, name="payment_transaction_enum"), nullable=False)
 

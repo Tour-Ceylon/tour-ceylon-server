@@ -11,7 +11,7 @@ from app.models.enum import StayBookingStatus, StayRoomBlockStatus, StayRoomBloc
 class StayProperty(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "stay_properties"
 
-    vendor_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    vendor_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True)
     listing_id = Column(UUID(as_uuid=True), ForeignKey("listings.id"), nullable=True, index=True)
 
     name = Column(String(255), nullable=False)

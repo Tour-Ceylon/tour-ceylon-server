@@ -80,16 +80,40 @@ class StayRepository:
             raise
         return self.get_for_vendor(vendor_id, db_property.id)
 
-    def update_for_vendor(self, vendor_id: UUID, property_id: UUID, payload: StayPropertyCreate) -> StayProperty | None:
-        db_property = self.get_for_vendor(vendor_id, property_id)
-        if db_property is None:
-            db_property = self.create_from_listing(vendor_id, property_id)
+    def update_property(
+        self, property_id: UUID, payload: StayPropertyCreate, user_id: UUID, is_admin: bool = False
+    ) -> StayProperty | None:
+        if is_admin:
+            db_property = self.get_by_id(property_id)
+            if db_property is None:
+                from app.models.listing import Listing
+                listing = self.db.query(Listing).filter(Listing.id == property_id).first()
+                if listing:
+                    db_property = self.create_from_listing(listing.vendor_id, property_id)
+        else:
+            db_property = self.get_for_vendor(user_id, property_id)
+            if db_property is None:
+                db_property = self.create_from_listing(user_id, property_id)
+
         if db_property is None:
             return None
 
         try:
             data = payload.model_dump(by_alias=False)
-            for key, value in self._property_model_data(data, vendor_id).items():
+            target_vendor_id = db_property.vendor_id
+
+            previous_status = str(db_property.status or "").lower()
+            incoming_status = str(data.get("status") or "").lower()
+
+            # Status preservation rule:
+            # If the property was already approved/published, keep it approved/published unless explicitly set to 'draft'.
+            # Admin updates for active listings also ensure approved status.
+            if previous_status in {"approved", "published"} and incoming_status != "draft":
+                data["status"] = previous_status
+            elif is_admin and incoming_status in {"submitted", "approved", "published"}:
+                data["status"] = "approved"
+
+            for key, value in self._property_model_data(data, target_vendor_id).items():
                 if key == "vendor_id":
                     continue
                 setattr(db_property, key, value)
@@ -100,7 +124,10 @@ class StayRepository:
         except Exception:
             self.db.rollback()
             raise
-        return self.get_for_vendor(vendor_id, db_property.id)
+        return self.get_by_id(db_property.id)
+
+    def update_for_vendor(self, vendor_id: UUID, property_id: UUID, payload: StayPropertyCreate) -> StayProperty | None:
+        return self.update_property(property_id, payload, user_id=vendor_id, is_admin=False)
 
     def list_for_vendor(self, vendor_id: UUID) -> list[StayProperty]:
         properties = (
@@ -284,9 +311,17 @@ class StayRepository:
         return {"value": value}
 
     @staticmethod
-    def _generate_room_numbers(name: str, prefix: str | None, count: int) -> list[str]:
+    def _generate_room_numbers(name: str, prefix: str | None, count: int, used_numbers: set[str]) -> list[str]:
         safe_prefix = prefix or "".join(part[:1] for part in name.split() if part).upper() or "RM"
-        return [f"{safe_prefix}-{index:03d}" for index in range(1, count + 1)]
+        generated: list[str] = []
+        index = 1
+        while len(generated) < count:
+            candidate = f"{safe_prefix}-{index:03d}"
+            if candidate not in used_numbers:
+                used_numbers.add(candidate)
+                generated.append(candidate)
+            index += 1
+        return generated
 
     def _normalize_media_payload(self, media_items: list[dict], vendor_id: UUID) -> list[dict]:
         normalized: list[dict] = []
@@ -398,6 +433,8 @@ class StayRepository:
     def _replace_children(self, db_property: StayProperty, data: dict) -> None:
         for amenity_map in list(db_property.amenities or []):
             self.db.delete(amenity_map)
+        for room_unit in list(db_property.room_units or []):
+            self.db.delete(room_unit)
         for room_type in list(db_property.room_types or []):
             self.db.delete(room_type)
         self.db.flush()
@@ -412,6 +449,7 @@ class StayRepository:
                 )
             )
 
+        used_room_numbers: set[str] = set()
         seen_room_names: dict[str, int] = {}
         for raw_room_type_data in data.get("room_types", []):
             room_type_data = dict(raw_room_type_data)
@@ -439,7 +477,15 @@ class StayRepository:
             self.db.add(room_type)
             self.db.flush()
 
-            unit_numbers = room_units or self._generate_room_numbers(room_type.name, unit_prefix, count)
+            if room_units:
+                unit_numbers = []
+                for u in room_units:
+                    if u not in used_room_numbers:
+                        used_room_numbers.add(u)
+                        unit_numbers.append(u)
+            else:
+                unit_numbers = self._generate_room_numbers(room_type.name, unit_prefix, count, used_room_numbers)
+
             for unit_number in unit_numbers:
                 self.db.add(
                     StayRoomUnit(

@@ -7,14 +7,37 @@ from app.schemas.stay_schema import (
     StayAvailabilitySearchResponse,
     StayBookingCreate,
     StayBookingResponse,
+    StayPropertyResponse,
 )
 from app.services.stay_inventory_service import StayInventoryService
+from app.repositories.stay_repo import StayRepository
 
 router = APIRouter()
 
 
 def get_stay_inventory_service(db: Session = Depends(get_db)) -> StayInventoryService:
     return StayInventoryService(db)
+
+
+@router.get("/public/listing/{listing_id}", response_model=StayPropertyResponse, response_model_by_alias=True)
+async def get_stay_by_listing(
+    listing_id: str,
+    db: Session = Depends(get_db),
+):
+    repo = StayRepository(db)
+    property_record = repo.get_by_id(listing_id)
+    if not property_record:
+        from app.models.listing import Listing
+        listing = db.query(Listing).filter(Listing.id == listing_id).first()
+        if listing and listing.vendor_id:
+            try:
+                property_record = repo.create_from_listing(listing.vendor_id, listing_id)
+            except Exception:
+                pass
+                
+    if not property_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stay property not found for this listing")
+    return property_record
 
 
 @router.post("/availability", response_model=StayAvailabilitySearchResponse, response_model_by_alias=True)

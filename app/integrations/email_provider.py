@@ -211,5 +211,183 @@ If you need immediate assistance, please contact us using the details above.
             logger.error("Failed to send customer confirmation email for %s: %s", inquiry.reference, str(e))
             return False
 
+    def send_booking_confirmation_pay_at_property(self, booking_data: dict) -> bool:
+        """Send Pay at Property booking confirmation email to customer"""
+        if not self.smtp_configured:
+            logger.warning("SMTP not configured - logging Pay at Property booking confirmation email for %s", booking_data.get("booking_reference"))
+            return False
+            
+        try:
+            to_email = booking_data.get("guest_email") or booking_data.get("email")
+            if not to_email:
+                return False
+                
+            ref = booking_data.get("booking_reference", "TC-BKG")
+            msg = MIMEMultipart()
+            msg['From'] = self.email_from
+            msg['To'] = to_email
+            msg['Subject'] = f"Booking Confirmed - Ref: {ref} (Pay at Property)"
+
+            body = f"""Dear {booking_data.get('guest_name', 'Valued Customer')},
+
+Thank you for booking with Tour Ceylon! Your reservation has been CONFIRMED.
+
+BOOKING DETAILS:
+Reference Number: {ref}
+Booking Status: CONFIRMED
+Payment Method: Pay at Property (Cash/Card at Check-in)
+Total Amount Due at Property: {booking_data.get('total_amount')} {booking_data.get('currency', 'USD')}
+
+GUEST INFORMATION:
+Name: {booking_data.get('guest_name')}
+Email: {to_email}
+Phone: {booking_data.get('guest_phone', 'N/A')}
+Special Requests: {booking_data.get('special_requests', 'None')}
+
+CANCELLATION POLICY:
+Free cancellation up to 48 hours before check-in. Please present your booking reference upon arrival.
+
+We look forward to hosting you!
+
+Best regards,
+Tour Ceylon Team
+"""
+            msg.attach(MIMEText(body, 'plain'))
+            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.smtp_user, self.smtp_password)
+                server.send_message(msg)
+            logger.info("Pay at property confirmation email sent to %s for %s", to_email, ref)
+            return True
+        except Exception as e:
+            logger.error("Failed to send Pay at Property email for %s: %s", booking_data.get("booking_reference"), str(e))
+            return False
+
+    def send_booking_bank_transfer_instructions(self, booking_data: dict) -> bool:
+        """Send Bank Transfer instructions email to customer"""
+        if not self.smtp_configured:
+            logger.warning("SMTP not configured - logging Bank Transfer instructions email for %s", booking_data.get("booking_reference"))
+            return False
+            
+        try:
+            to_email = booking_data.get("guest_email") or booking_data.get("email")
+            if not to_email:
+                return False
+                
+            ref = booking_data.get("booking_reference", "TC-BKG")
+            msg = MIMEMultipart()
+            msg['From'] = self.email_from
+            msg['To'] = to_email
+            msg['Subject'] = f"Reservation Reserved - Bank Transfer Required (Ref: {ref})"
+
+            body = f"""Dear {booking_data.get('guest_name', 'Valued Customer')},
+
+Your reservation has been HELD. Please complete your bank transfer within 24-48 hours to confirm your booking.
+
+BOOKING DETAILS:
+Reference Number: {ref}
+Booking Status: PENDING (Awaiting Payment)
+Total Amount: {booking_data.get('total_amount')} {booking_data.get('currency', 'USD')}
+
+BANK TRANSFER DETAILS:
+Bank Name: Bank of Ceylon / Commercial Bank
+Account Name: Tour Ceylon Holdings Pvt Ltd
+Account Number: 1000-8899-2233
+Swift Code: BCEYLKLX
+Payment Reference / Description: MUST INCLUDE {ref}
+
+NEXT STEPS:
+Once you complete the bank transfer, please upload your receipt reference on the Tour Ceylon portal or reply to this email with your receipt.
+
+Best regards,
+Tour Ceylon Team
+"""
+            msg.attach(MIMEText(body, 'plain'))
+            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.smtp_user, self.smtp_password)
+                server.send_message(msg)
+            logger.info("Bank transfer instructions email sent to %s for %s", to_email, ref)
+            return True
+        except Exception as e:
+            logger.error("Failed to send Bank Transfer instructions email for %s: %s", booking_data.get("booking_reference"), str(e))
+            return False
+
+    def send_vendor_new_booking_alert(self, booking_data: dict, vendor_email: str = None) -> bool:
+        """Send new booking alert to vendor and admin team"""
+        if not self.smtp_configured:
+            logger.warning("SMTP not configured - logging vendor alert for %s", booking_data.get("booking_reference"))
+            return False
+        try:
+            to_email = vendor_email or settings.INQUIRY_EMAIL or "bookings@tourceylon.com"
+            ref = booking_data.get("booking_reference", "TC-BKG")
+            msg = MIMEMultipart()
+            msg['From'] = self.email_from
+            msg['To'] = to_email
+            msg['Subject'] = f"New Booking Received - Ref: {ref}"
+
+            body = f"""Dear Partner / Business Team,
+
+A new booking has been placed on Tour Ceylon:
+
+BOOKING REF: {ref}
+Payment Method: {booking_data.get('payment_method')}
+Status: {booking_data.get('status')}
+Customer: {booking_data.get('guest_name')} ({booking_data.get('guest_email')})
+Total Amount: {booking_data.get('total_amount')} {booking_data.get('currency', 'USD')}
+
+Please log in to your Vendor Portal to view complete details.
+
+Best regards,
+Tour Ceylon System
+"""
+            msg.attach(MIMEText(body, 'plain'))
+            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.smtp_user, self.smtp_password)
+                server.send_message(msg)
+            logger.info("Vendor alert email sent to %s for %s", to_email, ref)
+            return True
+        except Exception as e:
+            logger.error("Failed to send vendor alert email for %s: %s", booking_data.get("booking_reference"), str(e))
+            return False
+
+    def send_vendor_receipt_submission_alert(self, booking_data: dict, receipt_ref: str, vendor_email: str = None) -> bool:
+        """Send receipt submission alert to vendor and admin team"""
+        if not self.smtp_configured:
+            logger.warning("SMTP not configured - logging receipt submission alert for %s", booking_data.get("booking_reference"))
+            return False
+        try:
+            to_email = vendor_email or settings.INQUIRY_EMAIL or "bookings@tourceylon.com"
+            ref = booking_data.get("booking_reference", "TC-BKG")
+            msg = MIMEMultipart()
+            msg['From'] = self.email_from
+            msg['To'] = to_email
+            msg['Subject'] = f"ACTION REQUIRED: Payment Receipt Uploaded - Ref: {ref}"
+
+            body = f"""Dear Partner / Business Team,
+
+A customer has uploaded a bank transfer payment receipt for booking {ref}:
+
+Receipt Reference / Details: {receipt_ref}
+Customer Name: {booking_data.get('guest_name')} ({booking_data.get('guest_email')})
+Amount Due: {booking_data.get('total_amount')} {booking_data.get('currency', 'USD')}
+
+Please log in to your Vendor Portal and review the receipt, then click 'Mark as Paid' to confirm the booking.
+
+Best regards,
+Tour Ceylon System
+"""
+            msg.attach(MIMEText(body, 'plain'))
+            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.smtp_user, self.smtp_password)
+                server.send_message(msg)
+            logger.info("Receipt submission alert sent to %s for %s", to_email, ref)
+            return True
+        except Exception as e:
+            logger.error("Failed to send receipt submission alert for %s: %s", booking_data.get("booking_reference"), str(e))
+            return False
+
 
 email_provider = EmailProvider()

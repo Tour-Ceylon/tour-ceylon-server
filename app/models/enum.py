@@ -71,6 +71,12 @@ class BookingStatus(str, Enum):
     REFUNDED = "refunded"
 
 
+class PaymentMethod(str, Enum):
+    PAY_AT_PROPERTY = "pay_at_property"
+    BANK_TRANSFER = "bank_transfer"
+    ONLINE = "online"
+
+
 class PaymentProvider(str, Enum):
     STRIPE = "stripe"
     PAYPAL = "paypal"
@@ -83,6 +89,7 @@ class PaymentTransactionStatus(str, Enum):
     FAILED = "failed"
     CANCELLED = "cancelled"
     REFUNDED = "refunded"
+    NOT_REQUIRED = "not_required"
 
 
 class PricingRuleType(str, Enum):

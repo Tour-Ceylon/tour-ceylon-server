@@ -105,7 +105,7 @@ class StayRoomTypeResponse(BaseModel):
 
 class StayPropertyResponse(BaseModel):
     id: UUID
-    vendor_id: UUID = Field(alias="vendorId")
+    vendor_id: UUID | None = Field(default=None, alias="vendorId")
     listing_id: UUID | None = Field(default=None, alias="listingId")
     name: str
     property_type: str = Field(alias="propertyType")

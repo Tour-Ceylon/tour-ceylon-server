@@ -67,8 +67,15 @@ def is_admin_user(user: User) -> bool:
 
 def ensure_property_access(current_user: User, repo: StayRepository, property_id: UUID):
     property_record = repo.get_by_id(property_id) if is_admin_user(current_user) else repo.get_for_vendor(current_user.id, property_id)
-    if property_record is None and not is_admin_user(current_user):
-        property_record = repo.create_from_listing(current_user.id, property_id)
+    if property_record is None:
+        if is_admin_user(current_user):
+            from app.models.listing import Listing
+            listing = repo.db.query(Listing).filter(Listing.id == property_id).first()
+            if listing:
+                property_record = repo.create_from_listing(listing.vendor_id, property_id)
+        else:
+            property_record = repo.create_from_listing(current_user.id, property_id)
+            
     if property_record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stay property not found")
     return property_record
@@ -119,7 +126,9 @@ async def update_stay_property(
     repo: StayRepository = Depends(get_stay_repository),
 ):
     try:
-        property_record = repo.update_for_vendor(current_user.id, property_id, payload)
+        property_record = repo.update_property(
+            property_id, payload, user_id=current_user.id, is_admin=is_admin_user(current_user)
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except CloudinaryIntegrationError as exc:

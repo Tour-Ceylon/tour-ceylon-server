@@ -1,3 +1,4 @@
+from datetime import date
 from typing import List
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Query
@@ -14,8 +15,11 @@ from app.schemas.booking_schema import (
     BookingSearchParams,
     BookingStatusUpdate,
     BookingSummary,
+    BookingReceiptCreate,
+    ListingAvailabilityResponse,
 )
 from app.models.enum import BookingStatus
+from app.services.booking_service import BookingService, get_booking_service
 
 router = APIRouter()
 
@@ -25,32 +29,49 @@ def get_booking_repository(db: Session = Depends(get_db)) -> BookingRepository:
     return BookingRepository(db)
 
 
-@router.post("/", response_model=BookingResponse, status_code=status.HTTP_201_CREATED)
-async def create_booking(
-    booking_data: BookingCreate,
-    booking_repo: BookingRepository = Depends(get_booking_repository)
+@router.get("/availability", response_model=ListingAvailabilityResponse)
+def get_listing_availability(
+    listing_id: UUID = Query(..., alias="listingId"),
+    start_date: date = Query(..., alias="startDate"),
+    end_date: date = Query(..., alias="endDate"),
+    db: Session = Depends(get_db),
 ):
-    """Create a new booking"""
-    
-    first_booking_item = booking_data.booking_items[0]
-    if booking_repo.exists_booking(
-        booking_data.user_id,
-        first_booking_item.listing_id,
-        first_booking_item.travel_date,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Booking already exists for this user, listing and travel date"
-        )
-    
-    try:
-        booking = booking_repo.create(booking_data)
-        return booking
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create booking"
-        )
+    """Get per-night availability for a listing between start_date and end_date"""
+    service = get_booking_service(db)
+    # Check for expired bank transfer holds first
+    service.release_expired_bank_transfer_holds()
+    return service.get_listing_availability(listing_id, start_date, end_date)
+
+
+@router.post("/", response_model=BookingResponse, status_code=status.HTTP_201_CREATED)
+def create_booking(
+    booking_data: BookingCreate,
+    db: Session = Depends(get_db),
+):
+    """Create a new booking with dual payment methods and per-night availability locking"""
+    service = get_booking_service(db)
+    return service.create_booking(booking_data)
+
+
+@router.patch("/{booking_id}/mark-paid", response_model=BookingResponse)
+def mark_booking_as_paid(
+    booking_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """Mark a pending bank transfer booking as PAID / SUCCEEDED"""
+    service = get_booking_service(db)
+    return service.mark_as_paid(booking_id)
+
+
+@router.post("/{booking_id}/receipt", response_model=BookingResponse)
+def submit_booking_receipt(
+    booking_id: UUID,
+    receipt_data: BookingReceiptCreate,
+    db: Session = Depends(get_db),
+):
+    """Submit bank transfer receipt reference"""
+    service = get_booking_service(db)
+    return service.submit_receipt(booking_id, receipt_data)
 
 
 @router.get("/{booking_id}", response_model=BookingResponse)
