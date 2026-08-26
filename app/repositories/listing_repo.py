@@ -173,11 +173,27 @@ class ListingRepository:
             filters.append(ListingVariant.capacity_max >= total_guests)
 
         # Date range availability filter
-        if search_params.start_date and search_params.end_date:
-            # Simplistic approach: ensure at least one variant has capacity for the requested guests
-            # Ideally this would check AvailabilityCalendar for each date in the range.
-            # For now, we'll join AvailabilityCalendar if needed or just filter by variants
-            pass
+        if search_params.start_date:
+            try:
+                from datetime import datetime, date, timedelta
+                s_val = search_params.start_date
+                e_val = search_params.end_date
+                s_date = s_val.date() if isinstance(s_val, datetime) else s_val if isinstance(s_val, date) else datetime.fromisoformat(str(s_val).replace("Z", "+00:00")).date()
+                
+                if e_val:
+                    e_date = e_val.date() if isinstance(e_val, datetime) else e_val if isinstance(e_val, date) else datetime.fromisoformat(str(e_val).replace("Z", "+00:00")).date()
+                else:
+                    e_date = s_date + timedelta(days=1)
+
+                if e_date <= s_date:
+                    e_date = s_date + timedelta(days=1)
+
+                from app.services.stay_inventory_service import StayInventoryService
+                inventory_service = StayInventoryService(self.db)
+                avail_ids = inventory_service.get_available_stay_property_ids(s_date, e_date)
+                filters.append(Listing.id.in_(list(avail_ids)))
+            except Exception as exc:
+                print("Error filtering stay search availability by date range:", exc)
 
         if filters:
             query = query.filter(and_(*filters))

@@ -164,6 +164,11 @@ class StayRepository:
             .filter(or_(StayProperty.id == property_id, StayProperty.listing_id == property_id))
             .first()
         )
+        if property_record is None:
+            from app.models.listing import Listing
+            listing = self.db.query(Listing).filter(Listing.id == property_id).first()
+            if listing:
+                property_record = self.create_from_listing(listing.vendor_id, property_id)
         if property_record is not None:
             self._ensure_listing_projection(property_record)
             self.db.commit()
@@ -172,8 +177,6 @@ class StayRepository:
     def create_from_listing(self, vendor_id: UUID, listing_id: UUID) -> StayProperty | None:
         existing = self.get_by_id(listing_id)
         if existing is not None:
-            if existing.vendor_id != vendor_id:
-                return None
             return existing
 
         listing = (
@@ -431,12 +434,9 @@ class StayRepository:
         return property_data
 
     def _replace_children(self, db_property: StayProperty, data: dict) -> None:
+        # 1. Replace Amenities
         for amenity_map in list(db_property.amenities or []):
             self.db.delete(amenity_map)
-        for room_unit in list(db_property.room_units or []):
-            self.db.delete(room_unit)
-        for room_type in list(db_property.room_types or []):
-            self.db.delete(room_type)
         self.db.flush()
 
         for amenity_data in data.get("amenities", []):
@@ -449,8 +449,18 @@ class StayRepository:
                 )
             )
 
-        used_room_numbers: set[str] = set()
+        # 2. Upsert Room Types & Units (preserving IDs to protect room blocks and booking FK constraints)
+        from collections import defaultdict
+        existing_types_by_id = {rt.id: rt for rt in (db_property.room_types or [])}
+        existing_types_by_name = {rt.name.strip().lower(): rt for rt in (db_property.room_types or [])}
+        existing_units_by_type: dict[UUID, list[StayRoomUnit]] = defaultdict(list)
+        for u in (db_property.room_units or []):
+            existing_units_by_type[u.room_type_id].append(u)
+
+        used_room_numbers: set[str] = {u.room_number for u in (db_property.room_units or [])}
         seen_room_names: dict[str, int] = {}
+        processed_type_ids: set[UUID] = set()
+
         for raw_room_type_data in data.get("room_types", []):
             room_type_data = dict(raw_room_type_data)
             count = room_type_data.pop("count", 1)
@@ -465,37 +475,75 @@ class StayRepository:
             if room_type_data.get("max_guests") is not None:
                 room_type_data["max_guests"] = str(room_type_data["max_guests"])
             base_name = str(room_type_data.get("name") or "Room").strip() or "Room"
-            seen_room_names[base_name] = seen_room_names.get(base_name, 0) + 1
-            if seen_room_names[base_name] > 1:
-                room_type_data["name"] = f"{base_name} {seen_room_names[base_name]}"
-            else:
-                room_type_data["name"] = base_name
+            room_type_data["name"] = base_name
             room_type_data["property_id"] = db_property.id
             room_type_data["metadata_json"] = metadata
 
-            room_type = StayRoomType(**room_type_data)
-            self.db.add(room_type)
-            self.db.flush()
+            # Match existing room type by ID or Name
+            raw_id = raw_room_type_data.get("id")
+            room_type: StayRoomType | None = None
+            if raw_id:
+                try:
+                    target_uuid = UUID(str(raw_id))
+                    if target_uuid in existing_types_by_id:
+                        room_type = existing_types_by_id[target_uuid]
+                except (ValueError, TypeError):
+                    pass
 
-            if room_units:
-                unit_numbers = []
-                for u in room_units:
-                    if u not in used_room_numbers:
-                        used_room_numbers.add(u)
-                        unit_numbers.append(u)
+            if room_type is None and room_type_data["name"].strip().lower() in existing_types_by_name:
+                room_type = existing_types_by_name[room_type_data["name"].strip().lower()]
+
+            if room_type is not None:
+                for k, v in room_type_data.items():
+                    if k not in {"id", "property_id"}:
+                        setattr(room_type, k, v)
+                self.db.add(room_type)
             else:
-                unit_numbers = self._generate_room_numbers(room_type.name, unit_prefix, count, used_room_numbers)
+                room_type = StayRoomType(**room_type_data)
+                self.db.add(room_type)
+                self.db.flush()
 
-            for unit_number in unit_numbers:
-                self.db.add(
-                    StayRoomUnit(
-                        property_id=db_property.id,
-                        room_type_id=room_type.id,
-                        room_number=unit_number,
-                        floor=floor,
-                        status="available",
+            processed_type_ids.add(room_type.id)
+
+            # Manage Units for this Room Type
+            current_units = existing_units_by_type.get(room_type.id, [])
+            target_count = max(int(count or 1), 1)
+            if len(current_units) < target_count:
+                needed = target_count - len(current_units)
+                if room_units and len(room_units) >= len(current_units) + needed:
+                    unit_numbers = [u for u in room_units if u not in used_room_numbers][:needed]
+                else:
+                    unit_numbers = self._generate_room_numbers(room_type.name, unit_prefix, needed, used_room_numbers)
+
+                for unit_number in unit_numbers:
+                    self.db.add(
+                        StayRoomUnit(
+                            property_id=db_property.id,
+                            room_type_id=room_type.id,
+                            room_number=unit_number,
+                            floor=floor,
+                            status="available",
+                        )
                     )
-                )
+                    used_room_numbers.add(unit_number)
+            elif len(current_units) > target_count:
+                excess_count = len(current_units) - target_count
+                units_to_remove = current_units[-excess_count:]
+                for unit in units_to_remove:
+                    used_room_numbers.discard(unit.room_number)
+                    for block in list(unit.room_blocks or []):
+                        self.db.delete(block)
+                    self.db.delete(unit)
+
+        # Delete room types removed by vendor
+        for old_rt in list(db_property.room_types or []):
+            if old_rt.id not in processed_type_ids:
+                for unit in list(old_rt.room_units or []):
+                    for block in list(unit.room_blocks or []):
+                        self.db.delete(block)
+                    self.db.delete(unit)
+                self.db.delete(old_rt)
+        self.db.flush()
 
     def _get_or_create_destination(self, property_record: StayProperty) -> Destination:
         destination_name = (

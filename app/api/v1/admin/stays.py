@@ -15,6 +15,7 @@ from app.schemas.stay_schema import (
     StayCalendarResponse,
     StayInventoryResponse,
     StayRoomBlockCreate,
+    StayRoomBlockListResponse,
     StayRoomBlockResponse,
     StayRoomTypeCreate,
     StayRoomTypeResponse,
@@ -23,6 +24,7 @@ from app.schemas.stay_schema import (
     StayRoomUnitResponse,
     StayRoomUnitUpdate,
 )
+from app.models.stay import StayProperty
 from app.services.stay_inventory_service import StayInventoryService
 
 router = APIRouter(prefix="/stays", tags=["admin-stays"])
@@ -131,6 +133,13 @@ async def delete_room_unit(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
+def _require_admin_property(service: StayInventoryService, property_id: UUID) -> StayProperty:
+    prop = service.get_property(property_id)
+    if prop is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stay property not found")
+    return prop
+
+
 @router.get("/{property_id}/calendar", response_model=StayCalendarResponse, response_model_by_alias=True)
 async def get_calendar(
     property_id: UUID,
@@ -140,8 +149,30 @@ async def get_calendar(
     _: User = Depends(require_stay_admin),
     service: StayInventoryService = Depends(get_stay_inventory_service),
 ):
+    prop = _require_admin_property(service, property_id)
     try:
-        return service.get_calendar(property_id, start_date, end_date, room_type_id)
+        return service.get_calendar(prop.id, start_date, end_date, room_type_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/{property_id}/blocks", response_model=StayRoomBlockListResponse, response_model_by_alias=True)
+async def list_blocks(
+    property_id: UUID,
+    room_type_id: UUID | None = Query(None, alias="roomTypeId"),
+    start_date: date | None = Query(None, alias="startDate"),
+    end_date: date | None = Query(None, alias="endDate"),
+    _: User = Depends(require_stay_admin),
+    service: StayInventoryService = Depends(get_stay_inventory_service),
+):
+    prop = _require_admin_property(service, property_id)
+    try:
+        return service.list_property_blocks(
+            prop.id,
+            room_type_id=room_type_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -153,8 +184,9 @@ async def create_block(
     current_user: User = Depends(require_stay_admin),
     service: StayInventoryService = Depends(get_stay_inventory_service),
 ):
+    prop = _require_admin_property(service, property_id)
     try:
-        return service.create_room_block(property_id, current_user, payload)
+        return service.create_room_block(prop.id, current_user, payload)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -166,8 +198,9 @@ async def release_block(
     _: User = Depends(require_stay_admin),
     service: StayInventoryService = Depends(get_stay_inventory_service),
 ):
+    prop = _require_admin_property(service, property_id)
     try:
-        return service.release_room_block(property_id, block_id)
+        return service.release_room_block(prop.id, block_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -178,8 +211,9 @@ async def list_bookings(
     _: User = Depends(require_stay_admin),
     service: StayInventoryService = Depends(get_stay_inventory_service),
 ):
+    prop = _require_admin_property(service, property_id)
     try:
-        return service.list_property_bookings(property_id)
+        return service.list_property_bookings(prop.id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -191,8 +225,9 @@ async def create_booking(
     _: User = Depends(require_stay_admin),
     service: StayInventoryService = Depends(get_stay_inventory_service),
 ):
-    if payload.property_id != property_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="propertyId must match the route property id")
+    prop = _require_admin_property(service, property_id)
+    if payload.property_id != property_id and payload.property_id != prop.id:
+        payload.property_id = prop.id
     try:
         booking = service.create_booking(payload, confirm=True)
         return StayBookingResponse.model_validate(booking)

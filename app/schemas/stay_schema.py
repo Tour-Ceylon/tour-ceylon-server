@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
@@ -18,6 +18,7 @@ class StayAmenityInput(BaseModel):
 
 
 class StayRoomTypeInput(BaseModel):
+    id: UUID | None = None
     name: str = Field(min_length=1, max_length=160)
     description: str | None = None
     count: int = Field(default=1, ge=1)
@@ -215,7 +216,7 @@ class StayRoomUnitUpdate(BaseModel):
 
 
 class StayRoomBlockCreate(BaseModel):
-    room_unit_id: UUID = Field(alias="roomUnitId")
+    room_unit_id: UUID | None = Field(default=None, alias="roomUnitId")
     start_date: date = Field(alias="startDate")
     end_date: date = Field(alias="endDate")
     block_type: StayRoomBlockType = Field(default=StayRoomBlockType.MANUAL, alias="blockType")
@@ -227,7 +228,7 @@ class StayRoomBlockCreate(BaseModel):
     @model_validator(mode="after")
     def validate_date_range(self):
         if self.end_date <= self.start_date:
-            raise ValueError("endDate must be after startDate")
+            self.end_date = self.start_date + timedelta(days=1)
         return self
 
 

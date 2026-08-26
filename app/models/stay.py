@@ -162,7 +162,7 @@ class StayRoomUnit(Base, UUIDMixin, TimestampMixin):
     property = relationship("StayProperty", back_populates="room_units")
     room_type = relationship("StayRoomType", back_populates="room_units")
     booking_rooms = relationship("StayBookingRoom", back_populates="room_unit")
-    room_blocks = relationship("StayRoomBlock", back_populates="room_unit")
+    room_blocks = relationship("StayRoomBlock", back_populates="room_unit", cascade="all, delete-orphan")
 
 
 class StayRoomProp(Base, UUIDMixin, TimestampMixin):

@@ -260,9 +260,9 @@ async def get_property_calendar(
     repo: StayRepository = Depends(get_stay_repository),
     service: StayInventoryService = Depends(get_stay_inventory_service),
 ):
-    ensure_property_access(current_user, repo, property_id)
+    property_record = ensure_property_access(current_user, repo, property_id)
     try:
-        return service.get_calendar(property_id, start_date, end_date, room_type_id)
+        return service.get_calendar(property_record.id, start_date, end_date, room_type_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -277,10 +277,10 @@ async def list_property_blocks(
     repo: StayRepository = Depends(get_stay_repository),
     service: StayInventoryService = Depends(get_stay_inventory_service),
 ):
-    ensure_property_access(current_user, repo, property_id)
+    property_record = ensure_property_access(current_user, repo, property_id)
     try:
         return service.list_property_blocks(
-            property_id,
+            property_record.id,
             room_type_id=room_type_id,
             start_date=start_date,
             end_date=end_date,
@@ -297,9 +297,9 @@ async def create_room_block(
     repo: StayRepository = Depends(get_stay_repository),
     service: StayInventoryService = Depends(get_stay_inventory_service),
 ):
-    ensure_property_access(current_user, repo, property_id)
+    property_record = ensure_property_access(current_user, repo, property_id)
     try:
-        return service.create_room_block(property_id, current_user, payload)
+        return service.create_room_block(property_record.id, current_user, payload)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -312,9 +312,9 @@ async def release_room_block(
     repo: StayRepository = Depends(get_stay_repository),
     service: StayInventoryService = Depends(get_stay_inventory_service),
 ):
-    ensure_property_access(current_user, repo, property_id)
+    property_record = ensure_property_access(current_user, repo, property_id)
     try:
-        return service.release_room_block(property_id, block_id)
+        return service.release_room_block(property_record.id, block_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -326,8 +326,8 @@ async def list_property_bookings(
     repo: StayRepository = Depends(get_stay_repository),
     service: StayInventoryService = Depends(get_stay_inventory_service),
 ):
-    ensure_property_access(current_user, repo, property_id)
+    property_record = ensure_property_access(current_user, repo, property_id)
     try:
-        return service.list_property_bookings(property_id)
+        return service.list_property_bookings(property_record.id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

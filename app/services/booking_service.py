@@ -52,11 +52,13 @@ class BookingService:
                 detail="end_date must be after start_date",
             )
 
-        property_record = (
-            self.db.query(StayProperty)
-            .filter(StayProperty.listing_id == listing_id)
-            .first()
-        )
+        from app.services.stay_inventory_service import StayInventoryService
+        inv_service = StayInventoryService(self.db)
+        property_record = inv_service.get_property(listing_id)
+        if property_record:
+            room_type_ids = {rt.id for rt in (property_record.room_types or [])}
+            if room_type_ids:
+                inv_service.refresh_calendar(property_record.id, room_type_ids, start_date, end_date - timedelta(days=1))
 
         nights_list: List[NightlyAvailability] = []
         current = start_date
@@ -75,11 +77,11 @@ class BookingService:
                     total = sum(e.total_units for e in calendar_entries)
                     booked = sum(e.booked_units for e in calendar_entries)
                     blocked = sum(e.blocked_units for e in calendar_entries)
-                    avail = sum(e.available_units for e in calendar_entries)
+                    avail = max(sum(e.available_units for e in calendar_entries), 0)
                 else:
-                    total, booked, blocked, avail = 10, 0, 0, 10
+                    total, booked, blocked, avail = 1, 0, 0, 1
             else:
-                total, booked, blocked, avail = 10, 0, 0, 10
+                total, booked, blocked, avail = 1, 0, 0, 1
 
             day_status = "OPEN" if avail > 0 else "SOLD_OUT"
             nights_list.append(
