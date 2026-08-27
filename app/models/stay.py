@@ -26,6 +26,7 @@ class StayProperty(Base, UUIDMixin, TimestampMixin):
     application_note = Column(Text, nullable=True)
     contact = Column(JSONB, nullable=False, default=dict)
     policies = Column(JSONB, nullable=False, default=dict)
+    payment_policy = Column(String(50), nullable=False, default="pay_at_property")
     media = Column(JSONB, nullable=False, default=list)
     metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
 

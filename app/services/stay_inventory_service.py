@@ -329,26 +329,15 @@ class StayInventoryService:
 
         end_date = payload.check_out_date if payload.check_out_date > payload.check_in_date else payload.check_in_date + timedelta(days=1)
         nights = max(1, (end_date - payload.check_in_date).days)
+        stay_end_inclusive = end_date - timedelta(days=1)
 
         room_type_ids = {room_type.id for room_type in room_types}
-        if room_type_ids:
-            self.refresh_calendar(real_property_id, room_type_ids, payload.check_in_date, end_date - timedelta(days=1))
-
         grouped_entries: dict[UUID, list[StayRoomTypeCalendar]] = defaultdict(list)
+
         if room_type_ids:
-            calendar_entries = (
-                self.db.query(StayRoomTypeCalendar)
-                .filter(
-                    StayRoomTypeCalendar.property_id == real_property_id,
-                    StayRoomTypeCalendar.room_type_id.in_(list(room_type_ids)),
-                    StayRoomTypeCalendar.stay_date >= payload.check_in_date,
-                    StayRoomTypeCalendar.stay_date < end_date,
-                )
-                .order_by(StayRoomTypeCalendar.stay_date.asc())
-                .all()
-            )
-            for entry in calendar_entries:
-                grouped_entries[entry.room_type_id].append(entry)
+            avail_map = self._compute_nightly_availability(real_property_id, room_type_ids, payload.check_in_date, stay_end_inclusive)
+            for (rt_id, stay_d), entry in sorted(avail_map.items(), key=lambda x: x[0][1]):
+                grouped_entries[rt_id].append(entry)
 
         results: list[StayAvailabilityRoomTypeResponse] = []
         for room_type in room_types:
@@ -406,6 +395,8 @@ class StayInventoryService:
         if nights <= 0:
             return set()
 
+        stay_end_inclusive = end_date - timedelta(days=1)
+
         for prop in properties:
             room_type_ids = {rt.id for rt in (prop.room_types or [])}
             if not room_type_ids:
@@ -414,22 +405,11 @@ class StayInventoryService:
                 available_listing_ids.add(prop.id)
                 continue
 
-            self.refresh_calendar(prop.id, room_type_ids, start_date, end_date - timedelta(days=1))
-
-            calendar_entries = (
-                self.db.query(StayRoomTypeCalendar)
-                .filter(
-                    StayRoomTypeCalendar.property_id == prop.id,
-                    StayRoomTypeCalendar.room_type_id.in_(list(room_type_ids)),
-                    StayRoomTypeCalendar.stay_date >= start_date,
-                    StayRoomTypeCalendar.stay_date < end_date,
-                )
-                .all()
-            )
+            avail_map = self._compute_nightly_availability(prop.id, room_type_ids, start_date, stay_end_inclusive)
 
             entries_by_date: dict[date, int] = defaultdict(int)
-            for entry in calendar_entries:
-                entries_by_date[entry.stay_date] += entry.available_units
+            for (rt_id, stay_d), entry in avail_map.items():
+                entries_by_date[stay_d] += entry.available_units
 
             has_capacity_all_nights = True
             current = start_date
@@ -703,28 +683,59 @@ class StayInventoryService:
             for night in self._night_dates(overlap_start, overlap_end):
                 blocked_units_by_day[(room_type_id, night)].add(room_unit_id)
 
+        values_to_upsert = []
+        now_dt = datetime.utcnow()
         touched_entry_count = 0
+
         for room_type_id in room_type_id_list:
             unit_count = total_units_by_type.get(room_type_id, 0)
             total_units = max(1, unit_count)
             for night in nights:
-                entry = existing_entries_by_key.get((room_type_id, night))
-                if entry is None:
-                    entry = StayRoomTypeCalendar(
-                        property_id=real_property_id,
-                        room_type_id=room_type_id,
-                        stay_date=night,
-                    )
-                    self.db.add(entry)
-                    existing_entries_by_key[(room_type_id, night)] = entry
-
                 booked_units = booked_counts.get((room_type_id, night), 0)
                 blocked_units = len(blocked_units_by_day.get((room_type_id, night), set()))
-                entry.total_units = total_units
-                entry.booked_units = booked_units
-                entry.blocked_units = blocked_units
-                entry.available_units = max(total_units - booked_units - blocked_units, 0)
+                available_units = max(total_units - booked_units - blocked_units, 0)
+
+                existing = existing_entries_by_key.get((room_type_id, night))
+                if existing:
+                    existing.total_units = total_units
+                    existing.booked_units = booked_units
+                    existing.blocked_units = blocked_units
+                    existing.available_units = available_units
+                else:
+                    values_to_upsert.append({
+                        "id": uuid4(),
+                        "property_id": real_property_id,
+                        "room_type_id": room_type_id,
+                        "stay_date": night,
+                        "total_units": total_units,
+                        "booked_units": booked_units,
+                        "blocked_units": blocked_units,
+                        "available_units": available_units,
+                        "created_at": now_dt,
+                        "updated_at": now_dt,
+                    })
                 touched_entry_count += 1
+
+        if values_to_upsert:
+            try:
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
+                stmt = pg_insert(StayRoomTypeCalendar).values(values_to_upsert)
+                stmt = stmt.on_conflict_do_update(
+                    constraint="uq_stay_room_type_calendar_date",
+                    set_={
+                        "total_units": stmt.excluded.total_units,
+                        "booked_units": stmt.excluded.booked_units,
+                        "blocked_units": stmt.excluded.blocked_units,
+                        "available_units": stmt.excluded.available_units,
+                        "updated_at": now_dt,
+                    },
+                )
+                self.db.execute(stmt)
+            except Exception:
+                for val in values_to_upsert:
+                    entry = StayRoomTypeCalendar(**val)
+                    self.db.merge(entry)
+
         self.db.flush()
         logger.info(
             "stay_inventory.refresh_calendar_timing property_id=%s room_type_count=%s start_date=%s end_date=%s booking_row_count=%s block_row_count=%s touched_entry_count=%s elapsed_ms=%.2f",
@@ -903,6 +914,114 @@ class StayInventoryService:
             "discounts": room_type.discounts,
             "roomUnits": [StayRoomUnitResponse.model_validate(room).model_dump(by_alias=True) for room in room_type.room_units or []],
         }
+
+    def _compute_nightly_availability(
+        self,
+        property_id: UUID,
+        room_type_ids: set[UUID],
+        start_date: date,
+        end_date: date,
+    ) -> dict[tuple[UUID, date], StayRoomTypeCalendar]:
+        room_type_id_list = list(room_type_ids)
+        nights = self._night_dates(start_date, end_date + timedelta(days=1))
+
+        existing_entries = (
+            self.db.query(StayRoomTypeCalendar)
+            .filter(
+                StayRoomTypeCalendar.property_id == property_id,
+                StayRoomTypeCalendar.room_type_id.in_(room_type_id_list),
+                StayRoomTypeCalendar.stay_date >= start_date,
+                StayRoomTypeCalendar.stay_date <= end_date,
+            )
+            .all()
+        )
+        all_keys = [
+            (rt_id, n)
+            for rt_id in room_type_id_list
+            for n in nights
+        ]
+
+        result: dict[tuple[UUID, date], StayRoomTypeCalendar] = {}
+
+        total_units_by_type = {rt_id: 0 for rt_id in room_type_id_list}
+        for rt_id, total_units in (
+            self.db.query(StayRoomUnit.room_type_id, func.count(StayRoomUnit.id))
+            .filter(
+                StayRoomUnit.property_id == property_id,
+                StayRoomUnit.room_type_id.in_(room_type_id_list),
+            )
+            .group_by(StayRoomUnit.room_type_id)
+            .all()
+        ):
+            total_units_by_type[rt_id] = total_units or 0
+
+        booked_counts: dict[tuple[UUID, date], int] = defaultdict(int)
+        booking_rows = (
+            self.db.query(
+                StayBookingRoom.room_type_id,
+                StayBookingRoom.check_in_date,
+                StayBookingRoom.check_out_date,
+            )
+            .join(StayBooking, StayBookingRoom.stay_booking_id == StayBooking.id)
+            .join(Booking, StayBooking.booking_id == Booking.id)
+            .filter(
+                StayBooking.property_id == property_id,
+                StayBookingRoom.room_type_id.in_(room_type_id_list),
+                StayBookingRoom.check_in_date <= end_date,
+                StayBookingRoom.check_out_date > start_date,
+                StayBooking.status != StayBookingStatus.CANCELLED,
+                Booking.status.in_(list(ACTIVE_PARENT_BOOKING_STATUSES)),
+            )
+            .all()
+        )
+        for room_type_id, check_in_date, check_out_date in booking_rows:
+            overlap_start = max(start_date, check_in_date)
+            overlap_end = min(end_date + timedelta(days=1), check_out_date)
+            for night in self._night_dates(overlap_start, overlap_end):
+                booked_counts[(room_type_id, night)] += 1
+
+        blocked_units_by_day: dict[tuple[UUID, date], set[UUID]] = defaultdict(set)
+        block_rows = (
+            self.db.query(
+                StayRoomUnit.room_type_id,
+                StayRoomBlock.room_unit_id,
+                StayRoomBlock.start_date,
+                StayRoomBlock.end_date,
+            )
+            .join(StayRoomUnit, StayRoomBlock.room_unit_id == StayRoomUnit.id)
+            .filter(
+                StayRoomBlock.property_id == property_id,
+                StayRoomUnit.room_type_id.in_(room_type_id_list),
+                StayRoomBlock.status == StayRoomBlockStatus.ACTIVE,
+                StayRoomBlock.start_date <= end_date,
+                StayRoomBlock.end_date > start_date,
+            )
+            .all()
+        )
+        for room_type_id, room_unit_id, block_start_date, block_end_date in block_rows:
+            overlap_start = max(start_date, block_start_date)
+            overlap_end = min(end_date + timedelta(days=1), block_end_date)
+            for night in self._night_dates(overlap_start, overlap_end):
+                blocked_units_by_day[(room_type_id, night)].add(room_unit_id)
+
+        for room_type_id, night in all_keys:
+            unit_count = total_units_by_type.get(room_type_id, 0)
+            total_units = max(1, unit_count)
+            booked_units = booked_counts.get((room_type_id, night), 0)
+            blocked_units = len(blocked_units_by_day.get((room_type_id, night), set()))
+            avail_units = max(total_units - booked_units - blocked_units, 0)
+
+            result[(room_type_id, night)] = StayRoomTypeCalendar(
+                property_id=property_id,
+                room_type_id=room_type_id,
+                stay_date=night,
+                total_units=total_units,
+                booked_units=booked_units,
+                blocked_units=blocked_units,
+                available_units=avail_units,
+            )
+
+        return result
 
     def _load_calendar_entries(
         self,

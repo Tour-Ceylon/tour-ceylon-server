@@ -263,6 +263,59 @@ Tour Ceylon Team
             logger.error("Failed to send Pay at Property email for %s: %s", booking_data.get("booking_reference"), str(e))
             return False
 
+    def send_booking_confirmation_online_paid(self, booking_data: dict) -> bool:
+        """Send Full Online Prepayment booking confirmation & digital receipt email to customer"""
+        if not self.smtp_configured:
+            logger.warning("SMTP not configured - logging Online Paid confirmation email for %s", booking_data.get("booking_reference"))
+            return False
+            
+        try:
+            to_email = booking_data.get("guest_email") or booking_data.get("email")
+            if not to_email:
+                return False
+                
+            ref = booking_data.get("booking_reference", "TC-BKG")
+            msg = MIMEMultipart()
+            msg['From'] = self.email_from
+            msg['To'] = to_email
+            msg['Subject'] = f"Booking Confirmed & Payment Received - Ref: {ref}"
+
+            body = f"""Dear {booking_data.get('guest_name', 'Valued Customer')},
+
+Thank you for booking with Tour Ceylon! Your payment has been RECEIVED and your reservation is FULLY CONFIRMED.
+
+PAYMENT & RECEIPT SUMMARY:
+Reference Number: {ref}
+Booking Status: CONFIRMED
+Payment Status: PAID ONLINE (100% Prepayment Received)
+Total Paid: {booking_data.get('total_amount')} {booking_data.get('currency', 'USD')}
+Transaction Reference: {booking_data.get('transaction_id', 'ONLINE-PAY-DIRECT')}
+
+RESERVATION DETAILS:
+Property / Listing: {booking_data.get('property_name', booking_data.get('listing_name', 'Tour Ceylon Listing'))}
+Guest Name: {booking_data.get('guest_name')}
+Email: {to_email}
+Special Requests: {booking_data.get('special_requests', 'None')}
+
+IMPORTANT CHECK-IN INSTRUCTIONS:
+No payment is required at the property upon arrival. Please present your booking reference ({ref}) and a valid photo ID during check-in.
+
+We look forward to hosting you!
+
+Best regards,
+Tour Ceylon Team
+"""
+            msg.attach(MIMEText(body, 'plain'))
+            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.smtp_user, self.smtp_password)
+                server.send_message(msg)
+            logger.info("Online paid confirmation email sent to %s for %s", to_email, ref)
+            return True
+        except Exception as e:
+            logger.error("Failed to send Online Paid confirmation email for %s: %s", booking_data.get("booking_reference"), str(e))
+            return False
+
     def send_booking_bank_transfer_instructions(self, booking_data: dict) -> bool:
         """Send Bank Transfer instructions email to customer"""
         if not self.smtp_configured:

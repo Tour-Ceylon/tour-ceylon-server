@@ -59,6 +59,12 @@ def _ensure_category_matches_listing(service: MediaService, category: str, listi
     response_model_by_alias=True,
     status_code=status.HTTP_201_CREATED,
 )
+@router.post(
+    "/stay/",
+    response_model=StayListingResponse,
+    response_model_by_alias=True,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_stay_listing(
     payload: StayListingCreate,
     service: AdminDashboardService = Depends(get_admin_service),
@@ -68,6 +74,12 @@ async def create_stay_listing(
 
 @router.post(
     "/tour",
+    response_model=TourListingResponse,
+    response_model_by_alias=True,
+    status_code=status.HTTP_201_CREATED,
+)
+@router.post(
+    "/tour/",
     response_model=TourListingResponse,
     response_model_by_alias=True,
     status_code=status.HTTP_201_CREATED,
@@ -85,6 +97,12 @@ async def create_tour_listing(
     response_model_by_alias=True,
     status_code=status.HTTP_201_CREATED,
 )
+@router.post(
+    "/safari/",
+    response_model=SafariListingResponse,
+    response_model_by_alias=True,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_safari_listing(
     payload: SafariListingCreate,
     service: AdminDashboardService = Depends(get_admin_service),
@@ -94,6 +112,12 @@ async def create_safari_listing(
 
 @router.post(
     "/experience",
+    response_model=ExperienceListingResponse,
+    response_model_by_alias=True,
+    status_code=status.HTTP_201_CREATED,
+)
+@router.post(
+    "/experience/",
     response_model=ExperienceListingResponse,
     response_model_by_alias=True,
     status_code=status.HTTP_201_CREATED,
@@ -111,6 +135,12 @@ async def create_experience_listing(
     response_model_by_alias=True,
     status_code=status.HTTP_201_CREATED,
 )
+@router.post(
+    "/transfer/",
+    response_model=TransferListingResponse,
+    response_model_by_alias=True,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_transfer_listing(
     payload: TransferListingCreate,
     service: AdminDashboardService = Depends(get_admin_service),
@@ -120,6 +150,11 @@ async def create_transfer_listing(
 
 @router.get(
     "/stay",
+    response_model=list[StayListingResponse],
+    response_model_by_alias=True,
+)
+@router.get(
+    "/stay/",
     response_model=list[StayListingResponse],
     response_model_by_alias=True,
 )
@@ -135,6 +170,11 @@ async def get_stay_listings(
     response_model=list[TourListingResponse],
     response_model_by_alias=True,
 )
+@router.get(
+    "/tour/",
+    response_model=list[TourListingResponse],
+    response_model_by_alias=True,
+)
 async def get_tour_listings(
     service: AdminDashboardService = Depends(get_admin_service),
     current_user: User = Depends(get_current_user),
@@ -144,6 +184,11 @@ async def get_tour_listings(
 
 @router.get(
     "/safari",
+    response_model=list[SafariListingResponse],
+    response_model_by_alias=True,
+)
+@router.get(
+    "/safari/",
     response_model=list[SafariListingResponse],
     response_model_by_alias=True,
 )
@@ -159,6 +204,11 @@ async def get_safari_listings(
     response_model=list[ExperienceListingResponse],
     response_model_by_alias=True,
 )
+@router.get(
+    "/experience/",
+    response_model=list[ExperienceListingResponse],
+    response_model_by_alias=True,
+)
 async def get_experience_listings(
     service: AdminDashboardService = Depends(get_admin_service),
     current_user: User = Depends(get_current_user),
@@ -168,6 +218,11 @@ async def get_experience_listings(
 
 @router.get(
     "/transfer",
+    response_model=list[TransferListingResponse],
+    response_model_by_alias=True,
+)
+@router.get(
+    "/transfer/",
     response_model=list[TransferListingResponse],
     response_model_by_alias=True,
 )

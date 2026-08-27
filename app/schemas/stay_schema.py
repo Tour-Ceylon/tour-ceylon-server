@@ -53,6 +53,7 @@ class StayPropertyCreate(BaseModel):
     application_note: str | None = Field(default=None, alias="applicationNote")
     contact: dict = Field(default_factory=dict)
     policies: dict = Field(default_factory=dict)
+    payment_policy: str = Field(default="pay_at_property", alias="paymentPolicy")
     media: list[dict] = Field(default_factory=list)
     amenities: list[StayAmenityInput] = Field(default_factory=list)
     room_types: list[StayRoomTypeInput] = Field(alias="roomTypes", min_length=1)
@@ -120,6 +121,7 @@ class StayPropertyResponse(BaseModel):
     application_note: str | None = Field(default=None, alias="applicationNote")
     contact: dict
     policies: dict
+    payment_policy: str = Field(default="pay_at_property", alias="paymentPolicy")
     media: list[dict]
     metadata_json: dict = Field(validation_alias="metadata_json", serialization_alias="metadata")
     amenities: list[StayAmenityResponse] = Field(default_factory=list)

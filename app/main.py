@@ -20,6 +20,25 @@ logging.basicConfig(
 app = FastAPI(title="Travel Ready Tours")
 app.add_exception_handler(AdminAPIError, admin_api_error_handler)
 
+
+from fastapi.responses import JSONResponse
+from fastapi import Request
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logging.error("Unhandled server exception on %s %s: %s", request.method, request.url.path, str(exc), exc_info=True)
+    origin = request.headers.get("origin", "*")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal Server Error: {str(exc)}"},
+        headers={
+            "Access-Control-Allow-Origin": origin if origin else "*",
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+        },
+    )
+
 # Add CORS middleware
 import os
 allowed_origins = [
