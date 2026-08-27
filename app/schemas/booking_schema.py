@@ -1,8 +1,9 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.enum import BookingStatus, CurrencyCode, PaymentTransactionStatus, PaymentMethod
 
@@ -34,6 +35,29 @@ class BookingItemBase(BaseModel):
     unit_price: float
     total_price: float
     travelers: list[BookingTravelerCreate] = []
+
+    @field_validator("travel_date", mode="before")
+    @classmethod
+    def parse_travel_date(cls, value: Any) -> date:
+        if isinstance(value, date) and not isinstance(value, datetime):
+            return value
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, str):
+            val = value.strip()
+            if " to " in val:
+                val = val.split(" to ")[0].strip()
+            try:
+                dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+                return dt.date()
+            except ValueError:
+                pass
+            try:
+                dt = datetime.strptime(val[:10], "%Y-%m-%d")
+                return dt.date()
+            except ValueError:
+                pass
+        return date.today()
 
 
 class BookingItemCreate(BookingItemBase):
