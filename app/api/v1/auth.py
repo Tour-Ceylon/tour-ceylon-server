@@ -1,10 +1,12 @@
 
 from app.schemas.driver_schema import DriverSignupRequest, DriverResponse
 from app.services.driver_service import DriverService
+import json
 import os
 import logging
-from typing import Dict, Any
-from fastapi import APIRouter, HTTPException, status, Depends
+import re as _re
+from typing import Dict, Any, List, Optional
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status, Depends
 from pydantic import BaseModel, EmailStr
 import httpx
 from sqlalchemy.orm import Session
@@ -252,11 +254,167 @@ async def auth_health():
     """Health check for auth service"""
     return {"status": "healthy", "service": "auth"}
 
+# ---------------------------------------------------------------------------
+# Allowed MIME types / max size for document uploads
+# ---------------------------------------------------------------------------
+_ALLOWED_DOC_TYPES = {"image/jpeg", "image/png", "image/webp", "application/pdf"}
+_MAX_DOC_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+def _validate_doc_file(upload: UploadFile, field_name: str) -> bytes:
+    """Validate content-type and size; return raw bytes on success."""
+    ct = (upload.content_type or "").split(";")[0].strip().lower()
+    if ct not in _ALLOWED_DOC_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{field_name}: unsupported file type '{ct}'. Allowed: JPEG, PNG, PDF.",
+        )
+    file_bytes = upload.file.read()
+    if not file_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{field_name}: uploaded file is empty.",
+        )
+    if len(file_bytes) > _MAX_DOC_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{field_name}: file exceeds 10 MB limit.",
+        )
+    return file_bytes
+
+
+def _email_to_folder_slug(email: str) -> str:
+    """Convert an email address to a safe Cloudinary folder component."""
+    return _re.sub(r"[^a-zA-Z0-9_-]", "_", email.split("@")[0])[:40]
+
+
 @router.post("/driver/signup", response_model=DriverResponse, status_code=status.HTTP_201_CREATED)
-def driver_signup(
-    payload: DriverSignupRequest,
+async def driver_signup(
+    # ── Scalar fields (all come as Form(...) in multipart) ──────────────────
+    full_name: str = Form(...),
+    nic_number: str = Form(...),
+    email: str = Form(...),
+    phone: str = Form(...),
+    password: Optional[str] = Form(None),
+    clerk_user_id: Optional[str] = Form(None),
+    country: Optional[str] = Form("Sri Lanka"),
+    vehicle_model_preset_id: Optional[str] = Form(None),
+    vehicle_make: str = Form(...),
+    vehicle_model: str = Form(...),
+    vehicle_plate_number: str = Form(...),
+    seats: int = Form(4),
+    luggage_capacities: str = Form("[]"),  # JSON-encoded list
+    license_number: Optional[str] = Form(None),
+    # ── URL fallbacks (for JSON-path clients / tests) ────────────────────────
+    license_photo_url: Optional[str] = Form(None),
+    nic_photo_url: Optional[str] = Form(None),
+    vehicle_registration_doc_url: Optional[str] = Form(None),
+    insurance_doc_url: Optional[str] = Form(None),
+    police_clearance_doc_url: Optional[str] = Form(None),
+    # ── File uploads (optional — if provided, take precedence over URL fields) ─
+    license_photo: Optional[UploadFile] = File(None),
+    nic_photo: Optional[UploadFile] = File(None),
+    vehicle_registration_doc: Optional[UploadFile] = File(None),
+    insurance_doc: Optional[UploadFile] = File(None),
+    police_clearance_doc: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
 ):
-    """Phase 1 Driver Signup endpoint creating user, driver record, and luggage capacity entries."""
+    """Phase 1 Driver Signup.
+
+    Accepts **multipart/form-data**.  Each document field can be either:
+    - An ``UploadFile`` (the actual file bytes — will be uploaded to Cloudinary),
+    - Or a plain URL string via the ``*_url`` fallback fields (for test clients
+      and API consumers that pre-host the document themselves).
+
+    File uploads take precedence over URL fields when both are provided.
+    """
+    from app.integrations.cloudinary import upload_document, delete_document, CloudinaryIntegrationError
+    from app.config.settings import settings
+    import uuid as _uuid
+
+    # Parse luggage capacities JSON
+    try:
+        raw_capacities = json.loads(luggage_capacities)
+    except (json.JSONDecodeError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="luggage_capacities must be a valid JSON array.",
+        )
+
+    # ── Upload any provided files to Cloudinary ──────────────────────────────
+    base_folder = (settings.CLOUDINARY_FOLDER or "tour-ceylon").strip("/")
+    email_slug = _email_to_folder_slug(email)
+    doc_folder = f"{base_folder}/drivers/{email_slug}"
+
+    uploaded_public_ids: List[str] = []
+
+    def _upload_one(upload: Optional[UploadFile], field_name: str, current_url: Optional[str]) -> Optional[str]:
+        """Upload a file if provided, otherwise return the existing URL."""
+        if upload is None or not getattr(upload, "filename", None):
+            return current_url
+        file_bytes = _validate_doc_file(upload, field_name)
+        try:
+            result = upload_document(file_bytes, folder=doc_folder)
+            uploaded_public_ids.append(result["public_id"])
+            return result["secure_url"]
+        except CloudinaryIntegrationError as exc:
+            # Clean up any already-uploaded assets before re-raising
+            for pid in uploaded_public_ids:
+                try:
+                    delete_document(pid)
+                except CloudinaryIntegrationError:
+                    pass
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to upload {field_name} to Cloudinary: {exc}",
+            ) from exc
+
+    try:
+        final_license_photo_url = _upload_one(license_photo, "license_photo", license_photo_url)
+        final_nic_photo_url = _upload_one(nic_photo, "nic_photo", nic_photo_url)
+        final_vehicle_reg_url = _upload_one(vehicle_registration_doc, "vehicle_registration_doc", vehicle_registration_doc_url)
+        final_insurance_url = _upload_one(insurance_doc, "insurance_doc", insurance_doc_url)
+        final_police_url = _upload_one(police_clearance_doc, "police_clearance_doc", police_clearance_doc_url)
+    except HTTPException:
+        raise
+
+    # ── Build DriverSignupRequest and call service ────────────────────────────
+    try:
+        from uuid import UUID as _UUID
+        preset_uuid = _UUID(vehicle_model_preset_id) if vehicle_model_preset_id else None
+    except ValueError:
+        preset_uuid = None
+
+    from app.schemas.driver_schema import DriverLuggageCapacityItem
+    try:
+        capacities = [DriverLuggageCapacityItem(**item) for item in raw_capacities]
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid luggage_capacities: {exc}",
+        )
+
+    payload = DriverSignupRequest(
+        full_name=full_name,
+        nic_number=nic_number,
+        email=email,
+        phone=phone,
+        password=password,
+        clerk_user_id=clerk_user_id,
+        country=country or "Sri Lanka",
+        vehicle_model_preset_id=preset_uuid,
+        vehicle_make=vehicle_make,
+        vehicle_model=vehicle_model,
+        vehicle_plate_number=vehicle_plate_number,
+        seats=seats,
+        luggage_capacities=capacities,
+        license_number=license_number,
+        license_photo_url=final_license_photo_url,
+        nic_photo_url=final_nic_photo_url,
+        vehicle_registration_doc_url=final_vehicle_reg_url,
+        insurance_doc_url=final_insurance_url,
+        police_clearance_doc_url=final_police_url,
+    )
+
     service = DriverService(db)
     return service.signup_driver(payload)

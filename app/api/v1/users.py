@@ -1,6 +1,6 @@
 from typing import List
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, File, HTTPException, status, Query, UploadFile
 from sqlalchemy.orm import Session
 import math
 import logging
@@ -357,3 +357,111 @@ async def get_user_role_stats(
         "inactive_users": inactive_count,
         "total_users": active_count + inactive_count
     }
+
+
+# ---------------------------------------------------------------------------
+# Vendor business document upload
+# ---------------------------------------------------------------------------
+
+_VENDOR_ALLOWED_DOC_TYPES = {"image/jpeg", "image/png", "image/webp", "application/pdf"}
+_VENDOR_MAX_DOC_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+@router.post("/{user_id}/documents", response_model=UserResponse, status_code=status.HTTP_200_OK)
+async def upload_vendor_documents(
+    user_id: UUID,
+    files: List[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Upload one or more business verification documents for a vendor user.
+
+    Files are uploaded to Cloudinary and their secure URLs are appended to
+    ``business_profile["documents"]`` as a list of
+    ``{"url": …, "name": …, "uploaded_at": …}`` objects.
+    """
+    from datetime import datetime, timezone
+    from app.integrations.cloudinary import upload_document, delete_document, CloudinaryIntegrationError
+    from app.config.settings import settings
+
+    # Load user
+    user = user_repo.get_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if not files:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="At least one file is required")
+
+    # Validate all files before uploading any
+    validated: list[tuple[bytes, str]] = []  # (bytes, filename)
+    for upload in files:
+        ct = (upload.content_type or "").split(";")[0].strip().lower()
+        if ct not in _VENDOR_ALLOWED_DOC_TYPES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"'{upload.filename}': unsupported type '{ct}'. Allowed: JPEG, PNG, PDF.",
+            )
+        file_bytes = upload.file.read()
+        if not file_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"'{upload.filename}': file is empty.",
+            )
+        if len(file_bytes) > _VENDOR_MAX_DOC_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"'{upload.filename}': file exceeds 10 MB limit.",
+            )
+        validated.append((file_bytes, upload.filename or "document"))
+
+    # Upload to Cloudinary
+    base_folder = (settings.CLOUDINARY_FOLDER or "tour-ceylon").strip("/")
+    doc_folder = f"{base_folder}/vendors/{user_id}"
+    uploaded_public_ids: list[str] = []
+    new_doc_entries: list[dict] = []
+
+    try:
+        for file_bytes, filename in validated:
+            result = upload_document(file_bytes, folder=doc_folder)
+            uploaded_public_ids.append(result["public_id"])
+            new_doc_entries.append({
+                "url": result["secure_url"],
+                "name": filename,
+                "uploaded_at": datetime.now(timezone.utc).isoformat(),
+            })
+    except CloudinaryIntegrationError as exc:
+        # Cleanup any already-uploaded assets
+        for pid in uploaded_public_ids:
+            try:
+                delete_document(pid)
+            except CloudinaryIntegrationError:
+                pass
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to upload document to Cloudinary: {exc}",
+        ) from exc
+
+    # Persist URLs into business_profile["documents"]
+    try:
+        existing_profile: dict = dict(user.business_profile) if user.business_profile else {}
+        existing_docs: list = list(existing_profile.get("documents", []))
+        existing_docs.extend(new_doc_entries)
+        existing_profile["documents"] = existing_docs
+        user.business_profile = existing_profile
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    except Exception as exc:
+        db.rollback()
+        # Cleanup uploaded Cloudinary assets since DB write failed
+        for pid in uploaded_public_ids:
+            try:
+                delete_document(pid)
+            except CloudinaryIntegrationError:
+                pass
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save document metadata",
+        ) from exc
+
+    return user

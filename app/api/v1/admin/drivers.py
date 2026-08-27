@@ -86,3 +86,18 @@ def suspend_driver(
 ):
     """Suspend an approved driver."""
     return service.update_driver_status(driver_id, "suspended")
+
+
+@router.get("/by-user/{user_id}", response_model=DriverResponse)
+def get_driver_by_user(
+    user_id: UUID,
+    _: User = Depends(require_driver_admin),
+    service: DriverService = Depends(get_driver_service),
+):
+    """Lookup a driver's full profile by their *user* ID.
+
+    Useful for admin UIs that only have the user-table UUID and need to
+    fetch the corresponding driver record (documents, vehicle, status, etc.)
+    without a separate search round-trip.
+    """
+    return service.get_driver_by_user_id(user_id)
