@@ -116,16 +116,29 @@ class Settings(BaseSettings):
     # ---------------------------------------------------
     def get_cors_origins(self) -> List[str]:
         """
-        Build final CORS origin list.
+        Build final CORS origin list with local development origins and normalized URLs without trailing slashes.
         """
-        origins = [
+        dev_origins = [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:3001",
+            "http://127.0.0.1:3001",
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+        ]
+
+        raw_origins = [
             str(self.CLIENT_APP_URL),
             str(self.ADMIN_APP_URL),
         ]
+        raw_origins.extend([str(o) for o in self.ADDITIONAL_CORS_ORIGINS])
+        raw_origins.extend(dev_origins)
 
-        origins.extend([str(o) for o in self.ADDITIONAL_CORS_ORIGINS])
-
-        return list(set(origins))
+        # Normalize: strip trailing slashes because Starlette CORSMiddleware matches exactly
+        normalized = {url.rstrip("/") for url in raw_origins if url}
+        return list(normalized)
     
     @property
     def clerk_public_key(self) -> Optional[str]:

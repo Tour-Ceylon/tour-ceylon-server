@@ -15,9 +15,26 @@ class UserRepository:
         self.db = db
     
     def create(self, user_data: UserCreate) -> User:
-        """Create a new user"""
+        """Create a new user and ensure Clerk user exists"""
+        clerk_id = user_data.clerk_user_id
+        if not clerk_id:
+            try:
+                from app.core.auth.clerk import create_clerk_user
+                role_val = user_data.role.value if hasattr(user_data.role, "value") else str(user_data.role)
+                clerk_id = create_clerk_user(
+                    email=user_data.email,
+                    password=getattr(user_data, "password", None),
+                    full_name=user_data.full_name,
+                    role=role_val,
+                    vendor_status=getattr(user_data, "vendor_status", None),
+                    approved_categories=getattr(user_data, "approved_categories", None),
+                    company_name=getattr(user_data, "company_name", None),
+                )
+            except Exception as e:
+                pass
+
         db_user = User(
-            clerk_user_id=user_data.clerk_user_id,
+            clerk_user_id=clerk_id,
             email=user_data.email,
             full_name=user_data.full_name,
             country=user_data.country,

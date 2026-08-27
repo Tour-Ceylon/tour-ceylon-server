@@ -8,6 +8,7 @@ from app.models.bookingStatusHistory import BookingStatusHistory
 from app.models.bookingTraveler import BookingTraveler
 from app.models.cancellationPolicy import CancellationPolicy
 from app.models.destination import Destination
+from app.models.driver import Driver, LuggageSizeType, VehicleModelPreset, DriverLuggageCapacity
 from app.models.hotelDetail import HotelDetail
 from app.models.listing import Listing
 from app.models.listingMedia import ListingMedia
@@ -52,6 +53,10 @@ __all__ = [
     "BookingTraveler",
     "CancellationPolicy",
     "Destination",
+    "Driver",
+    "LuggageSizeType",
+    "VehicleModelPreset",
+    "DriverLuggageCapacity",
     "HotelDetail",
     "Listing",
     "ListingMedia",

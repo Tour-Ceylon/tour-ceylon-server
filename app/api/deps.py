@@ -539,21 +539,16 @@ def get_auth_context(
 def require_role(allowed_roles: list[UserRole] | list[str]):
     """
     Dependency factory to enforce user role using the DB user as the source of truth.
-    Supports TOURIST/CUSTOMER/CLIENT aliases.
+    Only allows full capital roles: VENDOR, ADMIN, DRIVER, TOURIST.
     """
     normalized_allowed = set()
     for role in allowed_roles:
         val = role.value if isinstance(role, UserRole) else str(role)
-        val = val.strip().lower()
-        normalized_allowed.add(val)
-        # Add aliases
-        if val in ("tourist", "customer", "client"):
-            normalized_allowed.update(["tourist", "customer", "client"])
+        normalized_allowed.add(val.strip().upper())
 
     def dependency(current_user: User = Depends(get_current_user)) -> User:
         user_role = current_user.role.value if isinstance(current_user.role, UserRole) else str(current_user.role)
-        user_role = user_role.strip().lower()
-        if user_role not in normalized_allowed:
+        if user_role.strip().upper() not in normalized_allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Forbidden: User role not authorized",

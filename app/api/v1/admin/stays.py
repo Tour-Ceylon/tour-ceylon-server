@@ -34,7 +34,7 @@ def get_stay_inventory_service(db: Session = Depends(get_db)) -> StayInventorySe
 
 def require_stay_admin(current_user: User = Depends(get_current_user)) -> User:
     role = current_user.role.value if hasattr(current_user.role, "value") else current_user.role
-    if role not in {UserRole.ADMIN.value, UserRole.SUPPORT.value}:
+    if role not in {UserRole.ADMIN.value, "ADMIN", "admin"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return current_user
 

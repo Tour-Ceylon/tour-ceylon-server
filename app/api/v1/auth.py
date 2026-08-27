@@ -1,3 +1,6 @@
+
+from app.schemas.driver_schema import DriverSignupRequest, DriverResponse
+from app.services.driver_service import DriverService
 import os
 import logging
 from typing import Dict, Any
@@ -248,3 +251,12 @@ async def get_me(
 async def auth_health():
     """Health check for auth service"""
     return {"status": "healthy", "service": "auth"}
+
+@router.post("/driver/signup", response_model=DriverResponse, status_code=status.HTTP_201_CREATED)
+def driver_signup(
+    payload: DriverSignupRequest,
+    db: Session = Depends(get_db),
+):
+    """Phase 1 Driver Signup endpoint creating user, driver record, and luggage capacity entries."""
+    service = DriverService(db)
+    return service.signup_driver(payload)
