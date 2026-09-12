@@ -211,6 +211,71 @@ If you need immediate assistance, please contact us using the details above.
             logger.error("Failed to send customer confirmation email for %s: %s", inquiry.reference, str(e))
             return False
 
+    def send_vendor_booking_accepted_email(self, inquiry: 'BookingInquiryDetailed') -> bool:
+        """Send vendor booking confirmation email to customer when vendor accepts booking"""
+        if not self.smtp_configured:
+            logger.warning("SMTP not configured - logging vendor booking acceptance email for %s", inquiry.reference)
+            return False
+
+        try:
+            to_email = inquiry.email
+            if not to_email:
+                return False
+
+            msg = MIMEMultipart()
+            msg['From'] = self.email_from
+            msg['To'] = to_email
+            msg['Subject'] = f"🎉 Booking Confirmed! - REF: {inquiry.reference}"
+
+            cart_summary = ""
+            for item in inquiry.cart_items:
+                tdate = item.travel_date.strftime('%B %d, %Y') if hasattr(item.travel_date, 'strftime') else str(item.travel_date)
+                cart_summary += f"""
+• {item.title}
+  Travel Date: {tdate}
+  Travelers: {item.travel_count}
+  Price per person: {item.price} {item.base_currency}
+  Subtotal: {item.price * item.travel_count} {item.base_currency}
+"""
+
+            body = f"""
+Dear {inquiry.first_name} {inquiry.last_name},
+
+Great news! Your booking request with Tour Ceylon has been APPROVED & CONFIRMED by the vendor!
+
+CONFIRMED BOOKING DETAILS:
+Reference Number: {inquiry.reference}
+Guest Name: {inquiry.first_name} {inquiry.last_name}
+Email: {inquiry.email}
+Phone: {inquiry.phone}
+
+ITEMS & ROOM RESERVATIONS:{cart_summary}
+
+TOTAL AMOUNT: {inquiry.total} {inquiry.currency}
+SPECIAL REQUESTS / NOTES: {inquiry.special_requests or 'None'}
+
+RESERVATION STATUS:
+Your room unit allocation is officially confirmed and locked in the property calendar under Reference #{inquiry.reference}.
+
+Thank you for booking with Tour Ceylon! We look forward to hosting you.
+
+Best regards,
+Tour Ceylon Team
+Email: {self.email_from}
+"""
+            msg.attach(MIMEText(body, 'plain'))
+
+            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.smtp_user, self.smtp_password)
+                server.send_message(msg)
+
+            logger.info("Vendor booking acceptance email sent to %s for ref %s", to_email, inquiry.reference)
+            return True
+        except Exception as e:
+            logger.error("Failed to send vendor booking acceptance email for %s: %s", inquiry.reference, str(e))
+            return False
+
     def send_booking_confirmation_pay_at_property(self, booking_data: dict) -> bool:
         """Send Pay at Property booking confirmation email to customer"""
         if not self.smtp_configured:

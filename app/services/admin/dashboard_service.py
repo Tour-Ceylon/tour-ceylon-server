@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.api.errors import AdminAPIError
 from app.models.destination import Destination
-from app.models.enum import BookingUnit, CurrencyCode, ListingStatus, ListingType
+from app.models.enum import BookingUnit, CurrencyCode, ListingStatus, ListingType, UserRole
 from app.models.listing import Listing
 from app.models.stay import StayProperty
 from app.repositories.admin.addon_repo import AdminAddonRepository
@@ -76,6 +76,29 @@ class AdminDashboardService:
             (perf_time.perf_counter() - started_at) * 1000,
         )
         return response
+
+    def get_listing_by_id(self, category: str, listing_id: UUID, current_user) -> dict:
+        category = self._validate_category(category)
+        listing = self.listings.get_listing(listing_id)
+        if listing is None or listing.listing_type != self.LISTING_TYPE_MAP[category]:
+            raise self._not_found("Listing not found")
+
+        role = current_user.role.value if hasattr(current_user.role, "value") else current_user.role
+        if role == UserRole.VENDOR.value and listing.vendor_id != current_user.id:
+            raise self._not_found("Listing not found")
+
+        return self._build_listing_response(listing)
+
+    def get_any_listing_by_id(self, listing_id: UUID, current_user) -> dict:
+        listing = self.listings.get_listing(listing_id)
+        if listing is None:
+            raise self._not_found("Listing not found")
+
+        role = current_user.role.value if hasattr(current_user.role, "value") else current_user.role
+        if role == UserRole.VENDOR.value and listing.vendor_id != current_user.id:
+            raise self._not_found("Listing not found")
+
+        return self._build_listing_response(listing)
 
     def get_destinations(self) -> list[dict]:
         return [

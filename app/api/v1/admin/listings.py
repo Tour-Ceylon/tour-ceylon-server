@@ -233,6 +233,33 @@ async def get_transfer_listings(
     return service.get_listings("transfer", current_user)
 
 
+@router.get(
+    "/{category}/{listing_id}",
+    response_model=AdminListingResponse,
+    response_model_by_alias=True,
+)
+async def get_listing_by_category_and_id(
+    category: AdminListingCategory,
+    listing_id: UUID,
+    service: AdminDashboardService = Depends(get_admin_service),
+    current_user: User = Depends(get_current_user),
+):
+    return service.get_listing_by_id(category, listing_id, current_user)
+
+
+@router.get(
+    "/{listing_id}",
+    response_model=AdminListingResponse,
+    response_model_by_alias=True,
+)
+async def get_listing_by_id(
+    listing_id: UUID,
+    service: AdminDashboardService = Depends(get_admin_service),
+    current_user: User = Depends(get_current_user),
+):
+    return service.get_any_listing_by_id(listing_id, current_user)
+
+
 @router.patch(
     "/{category}/{listing_id}/status",
     response_model=AdminListingResponse,

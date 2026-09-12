@@ -153,25 +153,42 @@ class Listing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     @property
     def from_price(self) -> dict | None:
         priced_variants = [
-            variant for variant in list(self.variants or []) if variant.pricing is not None
+            variant for variant in list(self.variants or []) if variant.pricing is not None and (variant.pricing.get("amount") or 0) > 0
         ]
-        if not priced_variants:
-            return None
+        if priced_variants:
+            cheapest_variant = min(
+                priced_variants,
+                key=lambda item: (
+                    item.pricing["amount"],
+                    item.pricing["priority"],
+                    not item.is_default,
+                    item.name.lower(),
+                ),
+            )
+            return {
+                "amount": cheapest_variant.pricing["amount"],
+                "currency": cheapest_variant.pricing["currency"],
+                "priority": cheapest_variant.pricing["priority"],
+                "variant_id": cheapest_variant.id,
+                "variant_name": cheapest_variant.name,
+                "booking_unit": cheapest_variant.booking_unit,
+            }
 
-        cheapest_variant = min(
-            priced_variants,
-            key=lambda item: (
-                item.pricing["amount"],
-                item.pricing["priority"],
-                not item.is_default,
-                item.name.lower(),
-            ),
-        )
-        return {
-            "amount": cheapest_variant.pricing["amount"],
-            "currency": cheapest_variant.pricing["currency"],
-            "priority": cheapest_variant.pricing["priority"],
-            "variant_id": cheapest_variant.id,
-            "variant_name": cheapest_variant.name,
-            "booking_unit": cheapest_variant.booking_unit,
-        }
+        if hasattr(self, "stay_property") and self.stay_property and hasattr(self.stay_property, "room_types") and self.stay_property.room_types:
+            valid_room_prices = [
+                float(rt.base_price) for rt in self.stay_property.room_types
+                if getattr(rt, "base_price", None) is not None and float(rt.base_price) > 0
+            ]
+            if valid_room_prices:
+                min_room_price = min(valid_room_prices)
+                currency_str = str(self.base_currency.value) if hasattr(self.base_currency, "value") else str(self.base_currency or "USD")
+                return {
+                    "amount": min_room_price,
+                    "currency": currency_str,
+                    "priority": 1,
+                    "variant_id": None,
+                    "variant_name": "Minimum Room Rate",
+                    "booking_unit": "per_room",
+                }
+
+        return None

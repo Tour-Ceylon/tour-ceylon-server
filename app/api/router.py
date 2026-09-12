@@ -16,6 +16,7 @@ from app.api.v1 import (
     transport,
     stays,
     vendor_stays,
+    vendor_booking_inquiries,
     notifications,
 )
 
@@ -110,6 +111,12 @@ api_router.include_router(
     vendor_stays.router,
     prefix="/vendor/stays",
     tags=["vendor-stays"]
+)
+
+api_router.include_router(
+    vendor_booking_inquiries.router,
+    prefix="/vendor/booking-inquiries",
+    tags=["vendor-booking-inquiries"]
 )
 
 api_router.include_router(

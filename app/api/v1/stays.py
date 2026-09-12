@@ -29,10 +29,10 @@ async def get_stay_by_listing(
     if not property_record:
         from app.models.listing import Listing
         listing = db.query(Listing).filter(Listing.id == listing_id).first()
-        if listing and listing.vendor_id:
+        if listing:
             try:
                 property_record = repo.create_from_listing(listing.vendor_id, listing_id)
-            except Exception:
+            except Exception as ex:
                 pass
                 
     if not property_record:

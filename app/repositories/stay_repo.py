@@ -175,7 +175,11 @@ class StayRepository:
         return property_record
 
     def create_from_listing(self, vendor_id: UUID, listing_id: UUID) -> StayProperty | None:
-        existing = self.get_by_id(listing_id)
+        existing = (
+            self._base_query()
+            .filter(or_(StayProperty.id == listing_id, StayProperty.listing_id == listing_id))
+            .first()
+        )
         if existing is not None:
             return existing
 
@@ -190,7 +194,6 @@ class StayRepository:
             .filter(
                 Listing.id == listing_id,
                 Listing.listing_type == ListingType.HOTEL,
-                Listing.vendor_id == vendor_id,
             )
             .first()
         )
@@ -198,8 +201,9 @@ class StayRepository:
             return None
 
         detail = listing.hotel_detail
+        target_vendor_id = listing.vendor_id or vendor_id
         property_record = StayProperty(
-            vendor_id=vendor_id,
+            vendor_id=target_vendor_id,
             listing_id=listing.id,
             name=detail.property_name if detail and detail.property_name else listing.title,
             property_type=self._property_type_value(detail.property_type if detail else None),
@@ -605,9 +609,9 @@ class StayRepository:
         }
 
     def _create_listing_variants(self, listing: Listing, property_record: StayProperty) -> None:
-        for existing_variant in list(listing.variants or []):
-            self.db.delete(existing_variant)
-        self.db.flush()
+        existing_variants_by_name = {
+            v.name.strip().lower(): v for v in list(listing.variants or []) if v.name
+        }
 
         room_types = list(property_record.room_types or [])
         if not room_types:
@@ -624,26 +628,47 @@ class StayRepository:
             amount = float(room_type.base_price or 0)
             currency = self._currency_from_room(room_type)
             capacity_max = self._safe_int(room_type.max_guests) or 2
-            variant = ListingVariant(
-                listing_id=listing.id,
-                name=room_type.name,
-                booking_unit=BookingUnit.PER_ROOM,
-                capacity_min=1,
-                capacity_max=capacity_max,
-                is_default=index == 0,
-            )
-            self.db.add(variant)
-            self.db.flush()
-            variant.pricing_rules.append(
-                PricingRule(
-                    amount=amount,
-                    currency=currency,
-                    priority=index,
-                    pricing_rule_type=PricingRuleType.FIXED,
-                    min_guest=1,
-                    max_guest=capacity_max,
+            variant_name = (room_type.name or "Standard Room").strip() or "Standard Room"
+            
+            existing = existing_variants_by_name.get(variant_name.lower())
+            if existing is not None:
+                existing.capacity_min = 1
+                existing.capacity_max = capacity_max
+                existing.is_default = (index == 0)
+                existing.booking_unit = BookingUnit.PER_ROOM
+                variant = existing
+            else:
+                variant = ListingVariant(
+                    listing_id=listing.id,
+                    name=variant_name,
+                    booking_unit=BookingUnit.PER_ROOM,
+                    capacity_min=1,
+                    capacity_max=capacity_max,
+                    is_default=(index == 0),
                 )
-            )
+                self.db.add(variant)
+                self.db.flush()
+
+            # Update or append pricing rule
+            rules = list(variant.pricing_rules or [])
+            if rules:
+                rule = rules[0]
+                rule.amount = amount
+                rule.currency = currency
+                rule.priority = index
+                rule.min_guest = 1
+                rule.max_guest = capacity_max
+            else:
+                variant.pricing_rules.append(
+                    PricingRule(
+                        amount=amount,
+                        currency=currency,
+                        priority=index,
+                        pricing_rule_type=PricingRuleType.FIXED,
+                        min_guest=1,
+                        max_guest=capacity_max,
+                    )
+                )
 
     def _create_listing_media_assets(self, listing: Listing, property_record: StayProperty) -> None:
         projected_prefix = f"listing-projection/{listing.id}/"
