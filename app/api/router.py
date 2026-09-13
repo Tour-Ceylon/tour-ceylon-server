@@ -18,6 +18,8 @@ from app.api.v1 import (
     vendor_stays,
     vendor_booking_inquiries,
     notifications,
+    drivers,
+    driver_trips,
 )
 
 api_router = APIRouter()
@@ -123,4 +125,11 @@ api_router.include_router(
     notifications.router,
     prefix="/notifications",
     tags=["notifications"]
+    drivers.router,
+    tags=["drivers"]
+)
+
+api_router.include_router(
+    driver_trips.router,
+    tags=["driver-trips"]
 )

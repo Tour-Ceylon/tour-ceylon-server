@@ -2,13 +2,28 @@ from enum import Enum
 
 
 class UserRole(str, Enum):
-    TOURIST = "tourist"    # Legacy client-facing default
-    CUSTOMER = "customer"  # Alias for TOURIST (client frontend may use)
-    CLIENT = "client"      # Alias for TOURIST (client frontend may use)
-    ADMIN = "admin"
-    SUPPORT = "support"
-    VENDOR = "vendor"
+    VENDOR = "VENDOR"
+    ADMIN = "ADMIN"
+    DRIVER = "DRIVER"
+    TOURIST = "TOURIST"
 
+
+class AssignmentStatus(str, Enum):
+    UNASSIGNED = "unassigned"
+    ASSIGNED = "assigned"
+    ACKNOWLEDGED = "acknowledged"
+    EN_ROUTE = "en_route"
+    ARRIVED = "arrived"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    DECLINED = "declined"
+
+
+class DriverStatus(str, Enum):
+    PENDING_REVIEW = "pending_review"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    SUSPENDED = "suspended"
 
 class VendorStatus(str, Enum):
     PENDING = "pending"

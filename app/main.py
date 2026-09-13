@@ -8,6 +8,7 @@ from app.api.errors import AdminAPIError, admin_api_error_handler
 from app.config.database import engine
 import app.models
 from app.models.base import Base
+from app.config.settings import settings
 
 # Note: Database tables should be created via Alembic migrations
 # Base.metadata.create_all(bind=engine) # Removed for serverless deployment
@@ -64,6 +65,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_origins=settings.get_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

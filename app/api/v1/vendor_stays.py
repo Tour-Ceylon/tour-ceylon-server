@@ -49,7 +49,7 @@ def require_stay_vendor(current_user: User = Depends(get_current_user)) -> User:
     if not categories:
         # Fallback to all standard categories if empty/unset
         categories = ["Stay", "Tour", "Safari", "Experience", "Transfer"]
-    if role in {UserRole.ADMIN.value, UserRole.SUPPORT.value}:
+    if role in {UserRole.ADMIN.value, "ADMIN", "admin"}:
         return current_user
     if role != UserRole.VENDOR.value:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only vendors or admins can manage stay applications")
@@ -62,7 +62,7 @@ def require_stay_vendor(current_user: User = Depends(get_current_user)) -> User:
 
 def is_admin_user(user: User) -> bool:
     role = user.role.value if hasattr(user.role, "value") else user.role
-    return role in {UserRole.ADMIN.value, UserRole.SUPPORT.value}
+    return role in {UserRole.ADMIN.value, "ADMIN", "admin"}
 
 
 def ensure_property_access(current_user: User, repo: StayRepository, property_id: UUID):

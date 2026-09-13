@@ -56,9 +56,17 @@ class TransportBooking(Base, UUIDMixin, TimestampMixin):
     # unpaid, paid, refunded
     payment_status = Column(String, nullable=False, default="unpaid")
 
+    # Dispatch / Assignment
+    driver_id = Column(UUID(as_uuid=True), ForeignKey("drivers.id", ondelete="SET NULL"), nullable=True, index=True)
+    assignment_status = Column(String(50), nullable=False, default="unassigned", index=True)
+    assigned_at = Column(DateTime(timezone=True), nullable=True)
+    driver_responded_at = Column(DateTime(timezone=True), nullable=True)
+
     # Admin
     internal_notes = Column(Text, nullable=True)
 
     # Relationships
     user = relationship("User", back_populates="transport_bookings")
     vehicle_category = relationship("VehicleCategory", back_populates="bookings")
+    driver = relationship("Driver", back_populates="transport_bookings")
+    decline_reasons = relationship("TripDeclineReason", back_populates="transport_booking", cascade="all, delete-orphan")
