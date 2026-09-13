@@ -124,7 +124,11 @@ def _decode_and_verify_clerk_token(token: str) -> dict:
 
     audience = os.getenv("CLERK_AUDIENCE")
     issuer = os.getenv("CLERK_ISSUER")
-    options = {"verify_aud": bool(audience), "verify_iss": bool(issuer)}
+    options = {
+        "verify_aud": bool(audience),
+        "verify_iss": bool(issuer),
+        "leeway": 300,
+    }
     logger.debug(
         "auth.token_verification_config issuer=%s audience=%s verify_iss=%s verify_aud=%s",
         issuer,
@@ -142,6 +146,17 @@ def _decode_and_verify_clerk_token(token: str) -> dict:
             issuer=issuer if issuer else None,
             options=options,
         )
+    except jwt.ExpiredSignatureError as exc:
+        logger.warning(
+            "auth.token_expired issuer=%s audience=%s error=%s",
+            issuer,
+            audience,
+            str(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication token has expired",
+        ) from exc
     except JWTError as exc:
         logger.warning(
             "auth.token_decode_failed issuer=%s audience=%s error=%s",
@@ -306,9 +321,13 @@ def _apply_user_updates(db: Session, user: User, subject: str, email: str | None
         sync_action = "updated"
 
     if did_update_user:
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+        try:
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        except Exception as err:
+            db.rollback()
+            logger.warning("auth.apply_user_updates_rollback user_id=%s error=%s", user.id, str(err))
 
     return user, sync_action
 

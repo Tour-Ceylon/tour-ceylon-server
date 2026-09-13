@@ -1,8 +1,9 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, EmailStr
+from pydantic import BaseModel, ConfigDict, Field, EmailStr, field_validator
 
 from app.models.enum import CurrencyCode, InquiryStatus
 
@@ -17,6 +18,27 @@ class CartItemSchema(BaseModel):
     travel_count: int = Field(ge=1, alias="travelCount")
     price: Decimal = Field(ge=0)
     base_currency: CurrencyCode = Field(default=CurrencyCode.USD, alias="baseCurrency")
+
+    @field_validator("travel_date", mode="before")
+    @classmethod
+    def parse_travel_date(cls, value: Any) -> datetime:
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, date):
+            return datetime.combine(value, datetime.min.time())
+        if isinstance(value, str):
+            val = value.strip()
+            if " to " in val:
+                val = val.split(" to ")[0].strip()
+            try:
+                return datetime.fromisoformat(val.replace("Z", "+00:00"))
+            except ValueError:
+                pass
+            try:
+                return datetime.strptime(val[:10], "%Y-%m-%d")
+            except ValueError:
+                pass
+        return datetime.utcnow()
 
 
 class BookingInquiryBase(BaseModel):

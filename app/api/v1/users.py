@@ -64,6 +64,7 @@ async def create_user(
 
 
 @router.get("/me", response_model=UserResponse)
+@router.get("/me/", response_model=UserResponse)
 async def get_me(
     current_user: User = Depends(get_current_user),
 ):
@@ -73,6 +74,7 @@ async def get_me(
 
 
 @router.post("/sync", response_model=UserResponse)
+@router.post("/sync/", response_model=UserResponse)
 async def sync_user(
     current_user: User = Depends(get_current_user_with_sync),
 ):
@@ -82,6 +84,7 @@ async def sync_user(
 
 
 @router.post("/apply-vendor", response_model=UserResponse)
+@router.post("/apply-vendor/", response_model=UserResponse)
 async def apply_vendor(
     vendor_data: VendorApply,
     current_user: User = Depends(get_current_user),

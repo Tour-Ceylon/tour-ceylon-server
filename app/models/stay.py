@@ -11,7 +11,7 @@ from app.models.enum import StayBookingStatus, StayRoomBlockStatus, StayRoomBloc
 class StayProperty(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "stay_properties"
 
-    vendor_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    vendor_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True)
     listing_id = Column(UUID(as_uuid=True), ForeignKey("listings.id"), nullable=True, index=True)
 
     name = Column(String(255), nullable=False)
@@ -26,6 +26,7 @@ class StayProperty(Base, UUIDMixin, TimestampMixin):
     application_note = Column(Text, nullable=True)
     contact = Column(JSONB, nullable=False, default=dict)
     policies = Column(JSONB, nullable=False, default=dict)
+    payment_policy = Column(String(50), nullable=False, default="pay_at_property")
     media = Column(JSONB, nullable=False, default=list)
     metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
 
@@ -162,7 +163,7 @@ class StayRoomUnit(Base, UUIDMixin, TimestampMixin):
     property = relationship("StayProperty", back_populates="room_units")
     room_type = relationship("StayRoomType", back_populates="room_units")
     booking_rooms = relationship("StayBookingRoom", back_populates="room_unit")
-    room_blocks = relationship("StayRoomBlock", back_populates="room_unit")
+    room_blocks = relationship("StayRoomBlock", back_populates="room_unit", cascade="all, delete-orphan")
 
 
 class StayRoomProp(Base, UUIDMixin, TimestampMixin):

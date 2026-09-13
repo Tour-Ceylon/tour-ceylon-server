@@ -35,10 +35,10 @@ class BookingInquiryService:
             # Validate cart items pricing consistency
             self._validate_pricing(inquiry_data)
             
-            # Create the inquiry
+            # Create the inquiry (Pending vendor review & confirmation)
             db_inquiry = self.repository.create(inquiry_data)
             
-            logger.info(f"Created booking inquiry {db_inquiry.reference} for {db_inquiry.email}")
+            logger.info(f"Created booking inquiry {db_inquiry.reference} for {db_inquiry.email} (Pending Vendor Review)")
             
             # Convert to response schema
             return BookingInquiryResponse(
@@ -251,6 +251,125 @@ class BookingInquiryService:
             created_at=db_inquiry.created_at,
             updated_at=db_inquiry.updated_at
         )
+
+    def _auto_provision_stay_bookings(self, db_inquiry: BookingInquiry) -> None:
+        """
+        Auto-allocate room units and create StayBooking + StayBookingRoom records
+        when a client places a stay booking inquiry.
+        """
+        from app.models.stay import StayProperty, StayRoomType, StayRoomUnit, StayBooking, StayBookingRoom
+        from app.models.booking import Booking
+        from app.models.user import User
+        from app.models.enum import StayBookingStatus, BookingStatus, PaymentTransactionStatus, CurrencyCode
+        from datetime import datetime, timedelta, date
+        from decimal import Decimal
+        from uuid import UUID
+
+        system_user = self.db.query(User).first()
+
+        for item in db_inquiry.cart_items or []:
+            lid = item.get("listing_id")
+            if not lid:
+                continue
+            
+            prop = None
+            try:
+                prop_uuid = UUID(str(lid))
+                prop = self.db.query(StayProperty).filter(
+                    (StayProperty.id == prop_uuid) | (StayProperty.listing_id == prop_uuid)
+                ).first()
+            except ValueError:
+                pass
+
+            if not prop:
+                continue
+
+            tdate_str = item.get("travel_date")
+            check_in = date.today()
+            if tdate_str:
+                val = str(tdate_str).strip()
+                if " to " in val:
+                    val = val.split(" to ")[0].strip()
+                try:
+                    dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+                    check_in = dt.date()
+                except ValueError:
+                    try:
+                        check_in = datetime.strptime(val[:10], "%Y-%m-%d").date()
+                    except ValueError:
+                        pass
+
+            check_out = check_in + timedelta(days=1)
+
+            # Find room type and available room units
+            room_type = self.db.query(StayRoomType).filter(StayRoomType.property_id == prop.id).first()
+            if not room_type:
+                continue
+
+            requested_room_count = item.get("travel_count") or item.get("travelCount") or 1
+            try:
+                requested_room_count = int(requested_room_count)
+            except (ValueError, TypeError):
+                requested_room_count = 1
+
+            room_units = self.db.query(StayRoomUnit).filter(
+                StayRoomUnit.property_id == prop.id,
+                StayRoomUnit.room_type_id == room_type.id
+            ).all()
+
+            if not room_units:
+                continue
+
+            units_to_allocate = room_units[:requested_room_count]
+
+            try:
+                parent_booking = Booking(
+                    booking_reference=db_inquiry.reference,
+                    user_id=system_user.id if system_user else None,
+                    status=BookingStatus.CONFIRMED,
+                    total_amount=Decimal(str(db_inquiry.total or 100)),
+                    currency=CurrencyCode.USD,
+                    payment_status=PaymentTransactionStatus.PENDING,
+                    booked_at=db_inquiry.created_at or datetime.utcnow(),
+                )
+                self.db.add(parent_booking)
+                self.db.flush()
+
+                stay_booking = StayBooking(
+                    booking_id=parent_booking.id,
+                    property_id=prop.id,
+                    status=StayBookingStatus.CONFIRMED,
+                    check_in_date=check_in,
+                    check_out_date=check_out,
+                    guest_name=f"{db_inquiry.first_name} {db_inquiry.last_name}",
+                    guest_email=db_inquiry.email,
+                    guest_phone=db_inquiry.phone,
+                    special_requests=db_inquiry.special_requests,
+                    metadata_json={"inquiry_reference": db_inquiry.reference}
+                )
+                self.db.add(stay_booking)
+                self.db.flush()
+
+                total_item_price = Decimal(str(item.get("price") or 100))
+                per_unit_rate = total_item_price / Decimal(str(max(1, len(units_to_allocate))))
+
+                for unit in units_to_allocate:
+                    stay_booking_room = StayBookingRoom(
+                        stay_booking_id=stay_booking.id,
+                        room_unit_id=unit.id,
+                        room_type_id=room_type.id,
+                        check_in_date=check_in,
+                        check_out_date=check_out,
+                        nightly_rate=per_unit_rate,
+                        guests=2,
+                        metadata_json={}
+                    )
+                    self.db.add(stay_booking_room)
+                self.db.commit()
+                logger.info(f"Auto-provisioned StayBooking with {len(units_to_allocate)} room units for inquiry {db_inquiry.reference} on property {prop.name}")
+            except Exception as ex:
+                self.db.rollback()
+                logger.error(f"Failed to auto-provision StayBooking for inquiry {db_inquiry.reference}: {str(ex)}")
 
 
 def get_booking_inquiry_service(db: Session) -> BookingInquiryService:
