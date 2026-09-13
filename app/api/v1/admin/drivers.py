@@ -28,13 +28,14 @@ def require_driver_admin(current_user: User = Depends(get_current_user)) -> User
 def list_drivers(
     status: Optional[str] = Query(None, description="Filter by status: pending_review, approved, rejected, suspended"),
     search: Optional[str] = Query(None, description="Search by name, email, NIC, or plate number"),
+    is_online: Optional[bool] = Query(None, description="Filter by driver online availability"),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     _: User = Depends(require_driver_admin),
     service: DriverService = Depends(get_driver_service),
 ):
-    """List and search driver applications with status filtering."""
-    return service.list_drivers(status=status, search=search, page=page, per_page=per_page)
+    """List and search driver applications with status and online filtering."""
+    return service.list_drivers(status=status, search=search, is_online=is_online, page=page, per_page=per_page)
 
 
 @router.get("/{driver_id}", response_model=DriverResponse)

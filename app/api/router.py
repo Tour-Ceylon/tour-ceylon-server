@@ -17,6 +17,7 @@ from app.api.v1 import (
     stays,
     vendor_stays,
     drivers,
+    driver_trips,
 )
 
 api_router = APIRouter()
@@ -115,4 +116,9 @@ api_router.include_router(
 api_router.include_router(
     drivers.router,
     tags=["drivers"]
+)
+
+api_router.include_router(
+    driver_trips.router,
+    tags=["driver-trips"]
 )

@@ -4,7 +4,9 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models.enum import UserRole
+from sqlalchemy import func
+from app.models.enum import UserRole, AssignmentStatus
+from app.models.transportBooking import TransportBooking
 from app.models.user import User
 from app.repositories.driver_repository import DriverRepository
 from app.schemas.driver_schema import (
@@ -40,6 +42,44 @@ class DriverService:
         if driver.user and driver.user.business_profile:
             phone = driver.user.business_profile.get("phone")
 
+        # Calculate individual driver revenue and trip stats
+        total_earnings = 0.0
+        completed_trips_count = 0
+        active_trips_count = 0
+        try:
+            completed_stats = (
+                self.db.query(
+                    func.coalesce(func.sum(TransportBooking.total_price), 0),
+                    func.count(TransportBooking.id),
+                )
+                .filter(
+                    TransportBooking.driver_id == driver.id,
+                    TransportBooking.assignment_status == AssignmentStatus.COMPLETED.value,
+                )
+                .first()
+            )
+            if completed_stats:
+                total_earnings = float(completed_stats[0] or 0.0)
+                completed_trips_count = int(completed_stats[1] or 0)
+
+            active_count = (
+                self.db.query(func.count(TransportBooking.id))
+                .filter(
+                    TransportBooking.driver_id == driver.id,
+                    TransportBooking.assignment_status.in_([
+                        AssignmentStatus.ASSIGNED.value,
+                        AssignmentStatus.ACKNOWLEDGED.value,
+                        AssignmentStatus.EN_ROUTE.value,
+                        AssignmentStatus.ARRIVED.value,
+                        AssignmentStatus.IN_PROGRESS.value,
+                    ]),
+                )
+                .scalar()
+            )
+            active_trips_count = int(active_count or 0)
+        except Exception:
+            pass
+
         return DriverResponse(
             id=driver.id,
             user_id=driver.user_id,
@@ -59,6 +99,8 @@ class DriverService:
             vehicle_plate_number=driver.vehicle_plate_number,
             seats=driver.seats,
             status=driver.status,
+            is_online=getattr(driver, "is_online", False),
+            last_online_at=getattr(driver, "last_online_at", None),
             base_location=driver.base_location,
             languages_spoken=driver.languages_spoken or [],
             years_experience=driver.years_experience,
@@ -67,6 +109,9 @@ class DriverService:
             bank_account_number=driver.bank_account_number,
             rating=float(driver.rating) if driver.rating is not None else None,
             is_active=driver.is_active,
+            total_earnings=total_earnings,
+            completed_trips_count=completed_trips_count,
+            active_trips_count=active_trips_count,
             created_at=driver.created_at,
             updated_at=driver.updated_at,
             luggage_capacities=capacities,
@@ -183,11 +228,12 @@ class DriverService:
         self,
         status: Optional[str] = None,
         search: Optional[str] = None,
+        is_online: Optional[bool] = None,
         page: int = 1,
         per_page: int = 20,
     ) -> DriverListResponse:
         skip = (page - 1) * per_page
-        drivers, total = self.repo.list_drivers(status=status, search=search, skip=skip, limit=per_page)
+        drivers, total = self.repo.list_drivers(status=status, search=search, is_online=is_online, skip=skip, limit=per_page)
         return DriverListResponse(
             drivers=[self._to_driver_response(d) for d in drivers],
             total=total,

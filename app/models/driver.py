@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, Integer, Numeric, Boolean, ForeignKey
+from sqlalchemy import Column, String, Text, Integer, Numeric, Boolean, ForeignKey, DateTime
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 
@@ -71,6 +71,10 @@ class Driver(Base, UUIDMixin, TimestampMixin):
     # Status: pending_review | approved | rejected | suspended
     status = Column(String(50), nullable=False, default="pending_review", index=True)
 
+    # Dispatch & Online Availability
+    is_online = Column(Boolean, default=False, nullable=False, index=True)
+    last_online_at = Column(DateTime(timezone=True), nullable=True)
+
     # Phase 2 fields
     base_location = Column(String(255), nullable=True)
     languages_spoken = Column(JSONB, nullable=True, default=list)
@@ -87,6 +91,15 @@ class Driver(Base, UUIDMixin, TimestampMixin):
     vehicle_model_preset = relationship("VehicleModelPreset")
     luggage_capacities = relationship(
         "DriverLuggageCapacity",
+        back_populates="driver",
+        cascade="all, delete-orphan"
+    )
+    transport_bookings = relationship(
+        "TransportBooking",
+        back_populates="driver"
+    )
+    decline_reasons = relationship(
+        "TripDeclineReason",
         back_populates="driver",
         cascade="all, delete-orphan"
     )
@@ -109,3 +122,25 @@ class DriverLuggageCapacity(Base, TimestampMixin):
 
     driver = relationship("Driver", back_populates="luggage_capacities")
     luggage_size_type = relationship("LuggageSizeType", back_populates="driver_capacities")
+
+
+class TripDeclineReason(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "trip_decline_reasons"
+
+    transport_booking_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("transport_bookings.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    driver_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("drivers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    reason = Column(String(255), nullable=False)
+    note = Column(Text, nullable=True)
+
+    transport_booking = relationship("TransportBooking", back_populates="decline_reasons")
+    driver = relationship("Driver", back_populates="decline_reasons")

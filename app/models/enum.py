@@ -8,6 +8,15 @@ class UserRole(str, Enum):
     TOURIST = "TOURIST"
 
 
+class AssignmentStatus(str, Enum):
+    UNASSIGNED = "unassigned"
+    ASSIGNED = "assigned"
+    ACKNOWLEDGED = "acknowledged"
+    EN_ROUTE = "en_route"
+    ARRIVED = "arrived"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    DECLINED = "declined"
 
 
 class DriverStatus(str, Enum):

@@ -85,6 +85,8 @@ class DriverResponse(BaseModel):
     vehicle_plate_number: str
     seats: int
     status: str
+    is_online: bool = False
+    last_online_at: Optional[datetime] = None
     base_location: Optional[str] = None
     languages_spoken: Optional[List[str]] = Field(default_factory=list)
     years_experience: Optional[int] = None
@@ -93,6 +95,9 @@ class DriverResponse(BaseModel):
     bank_account_number: Optional[str] = None
     rating: Optional[float] = None
     is_active: bool
+    total_earnings: float = 0.0
+    completed_trips_count: int = 0
+    active_trips_count: int = 0
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     luggage_capacities: List[DriverLuggageCapacityResponseItem] = Field(default_factory=list)

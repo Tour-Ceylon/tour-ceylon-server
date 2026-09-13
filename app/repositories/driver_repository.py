@@ -117,6 +117,7 @@ class DriverRepository:
         self,
         status: Optional[str] = None,
         search: Optional[str] = None,
+        is_online: Optional[bool] = None,
         skip: int = 0,
         limit: int = 20,
     ) -> Tuple[List[Driver], int]:
@@ -124,6 +125,9 @@ class DriverRepository:
 
         if status:
             query = query.filter(Driver.status == status)
+
+        if is_online is not None:
+            query = query.filter(Driver.is_online == is_online)
 
         if search:
             search_pattern = f"%{search}%"
