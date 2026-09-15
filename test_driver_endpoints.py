@@ -160,7 +160,7 @@ class StubDriverService:
         driver.status = status
         return driver
 
-    def list_drivers(self, status=None, search=None, page=1, per_page=20):
+    def list_drivers(self, status=None, search=None, is_online=None, page=1, per_page=20):
         items = list(self.drivers_db.values())
         if not items:
             items = [self.get_driver_by_id(uuid4())]

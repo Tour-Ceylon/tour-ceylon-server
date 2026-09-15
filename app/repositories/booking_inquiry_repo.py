@@ -37,13 +37,25 @@ class BookingInquiryRepository:
                 item_dict = item if isinstance(item, dict) else dict(item)
             
             # Convert datetime and Decimal objects for JSON compatibility
-            for key, value in item_dict.items():
+            for key, value in list(item_dict.items()):
                 if isinstance(value, datetime):
                     # Convert datetime to ISO format string
                     item_dict[key] = value.isoformat()
                 elif isinstance(value, Decimal):
                     # Convert Decimal to float for JSON serialization
                     item_dict[key] = float(value)
+            
+            # If travel_date_raw is missing but we have travel_date and travel_date_end
+            if not item_dict.get('travel_date_raw'):
+                if item_dict.get('travel_date') and item_dict.get('travel_date_end'):
+                    start_str = str(item_dict['travel_date'])[:10]
+                    end_str = str(item_dict['travel_date_end'])[:10]
+                    item_dict['travel_date_raw'] = f"{start_str} to {end_str}"
+            
+            if item_dict.get('travel_date_raw') is None:
+                item_dict.pop('travel_date_raw', None)
+            if item_dict.get('travel_date_end') is None:
+                item_dict.pop('travel_date_end', None)
             
             serialized_items.append(item_dict)
         
@@ -67,6 +79,20 @@ class BookingInquiryRepository:
         
         # Properly serialize cart_items with datetime handling for JSON storage
         inquiry_dict['cart_items'] = self._serialize_cart_items(inquiry_dict['cart_items'])
+        
+        # Ensure travel_date_raw and travel_date_end are explicitly preserved in serialized items
+        try:
+            raw_items = inquiry_data.cart_items
+            for idx, serialized in enumerate(inquiry_dict['cart_items']):
+                if idx < len(raw_items):
+                    raw_item = raw_items[idx]
+                    if hasattr(raw_item, 'travel_date_raw') and raw_item.travel_date_raw:
+                        serialized['travel_date_raw'] = raw_item.travel_date_raw
+                    if hasattr(raw_item, 'travel_date_end') and raw_item.travel_date_end:
+                        val = raw_item.travel_date_end
+                        serialized['travel_date_end'] = val.isoformat() if hasattr(val, 'isoformat') else str(val)
+        except Exception:
+            pass
         
         # Generate unique reference
         inquiry_dict['reference'] = self.generate_inquiry_reference()

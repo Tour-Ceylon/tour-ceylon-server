@@ -75,9 +75,20 @@ Best,
             # Generate cart items summary
             cart_summary = ""
             for item in inquiry.cart_items:
+                if getattr(item, 'travel_date_end', None):
+                    t_start = item.travel_date.strftime('%Y-%m-%d') if hasattr(item.travel_date, 'strftime') else str(item.travel_date)[:10]
+                    t_end = item.travel_date_end.strftime('%Y-%m-%d') if hasattr(item.travel_date_end, 'strftime') else str(item.travel_date_end)[:10]
+                    tdate_display = f"{t_start} to {t_end}"
+                elif getattr(item, 'travel_date_raw', None) and " to " in str(item.travel_date_raw):
+                    tdate_display = str(item.travel_date_raw)
+                elif hasattr(item.travel_date, 'strftime'):
+                    tdate_display = item.travel_date.strftime('%Y-%m-%d %H:%M')
+                else:
+                    tdate_display = str(item.travel_date)
+
                 cart_summary += f"""
 • {item.title}
-  Travel Date: {item.travel_date.strftime('%Y-%m-%d %H:%M')}
+  Travel Date: {tdate_display}
   Travelers: {item.travel_count}
   Price: {item.price} {item.base_currency}
   Subtotal: {item.price * item.travel_count} {item.base_currency}
@@ -151,9 +162,20 @@ Tour Ceylon System
             for item in inquiry.cart_items:
                 item_total = item.price * item.travel_count
                 total_amount += item_total
+                if getattr(item, 'travel_date_end', None):
+                    t_start = item.travel_date.strftime('%B %d, %Y') if hasattr(item.travel_date, 'strftime') else str(item.travel_date)[:10]
+                    t_end = item.travel_date_end.strftime('%B %d, %Y') if hasattr(item.travel_date_end, 'strftime') else str(item.travel_date_end)[:10]
+                    tdate_display = f"{t_start} to {t_end}"
+                elif getattr(item, 'travel_date_raw', None) and " to " in str(item.travel_date_raw):
+                    tdate_display = str(item.travel_date_raw)
+                elif hasattr(item.travel_date, 'strftime'):
+                    tdate_display = item.travel_date.strftime('%B %d, %Y at %I:%M %p')
+                else:
+                    tdate_display = str(item.travel_date)
+
                 cart_summary += f"""
 • {item.title}
-  Travel Date: {item.travel_date.strftime('%B %d, %Y at %I:%M %p')}
+  Travel Date: {tdate_display}
   Travelers: {item.travel_count}
   Price per person: {item.price} {item.base_currency}
   Subtotal: {item_total} {item.base_currency}
@@ -229,7 +251,17 @@ If you need immediate assistance, please contact us using the details above.
 
             cart_summary = ""
             for item in inquiry.cart_items:
-                tdate = item.travel_date.strftime('%B %d, %Y') if hasattr(item.travel_date, 'strftime') else str(item.travel_date)
+                if getattr(item, 'travel_date_end', None):
+                    t_start = item.travel_date.strftime('%B %d, %Y') if hasattr(item.travel_date, 'strftime') else str(item.travel_date)[:10]
+                    t_end = item.travel_date_end.strftime('%B %d, %Y') if hasattr(item.travel_date_end, 'strftime') else str(item.travel_date_end)[:10]
+                    tdate = f"{t_start} to {t_end}"
+                elif getattr(item, 'travel_date_raw', None) and " to " in str(item.travel_date_raw):
+                    tdate = str(item.travel_date_raw)
+                elif hasattr(item.travel_date, 'strftime'):
+                    tdate = item.travel_date.strftime('%B %d, %Y')
+                else:
+                    tdate = str(item.travel_date)
+
                 cart_summary += f"""
 • {item.title}
   Travel Date: {tdate}

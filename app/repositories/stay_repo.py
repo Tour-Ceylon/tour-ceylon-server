@@ -390,7 +390,7 @@ class StayRepository:
             "archived": ListingStatus.ARCHIVED,
             "draft": ListingStatus.DRAFT,
         }
-        mapped_status = status_map.get(property_record.status, ListingStatus.DRAFT)
+        mapped_status = status_map.get(str(property_record.status or "").lower(), ListingStatus.DRAFT)
 
         listing_payload = {
             "destination_id": destination.id,

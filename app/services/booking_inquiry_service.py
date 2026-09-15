@@ -207,7 +207,7 @@ class BookingInquiryService:
             
             # Process field values
             for key, value in item_dict.items():
-                if key == 'travel_date' and isinstance(value, str):
+                if key in ('travel_date', 'travel_date_end') and isinstance(value, str):
                     try:
                         # Parse ISO datetime string back to datetime object
                         item_dict[key] = datetime.fromisoformat(value.replace('Z', '+00:00'))
@@ -257,10 +257,10 @@ class BookingInquiryService:
         Auto-allocate room units and create StayBooking + StayBookingRoom records
         when a client places a stay booking inquiry.
         """
-        from app.models.stay import StayProperty, StayRoomType, StayRoomUnit, StayBooking, StayBookingRoom
+        from app.models.stay import StayProperty, StayRoomType, StayRoomUnit, StayBooking, StayBookingRoom, StayRoomBlock
         from app.models.booking import Booking
         from app.models.user import User
-        from app.models.enum import StayBookingStatus, BookingStatus, PaymentTransactionStatus, CurrencyCode
+        from app.models.enum import StayBookingStatus, StayRoomBlockStatus, BookingStatus, PaymentTransactionStatus, CurrencyCode
         from datetime import datetime, timedelta, date
         from decimal import Decimal
         from uuid import UUID
@@ -284,10 +284,18 @@ class BookingInquiryService:
             if not prop:
                 continue
 
-            tdate_str = item.get("travel_date")
+            # --- Fix 3: Parse date ranges properly for multi-night stays ---
+            tdate_raw = item.get("travel_date_raw") or item.get("travelDateRaw")
+            tdate_end = item.get("travel_date_end") or item.get("travelDateEnd")
+            tdate_str = item.get("travel_date") or item.get("travelDate")
+
             check_in = date.today()
-            if tdate_str:
-                val = str(tdate_str).strip()
+            check_out = None
+
+            # 1. Parse check_in date
+            in_val = tdate_str or tdate_raw
+            if in_val:
+                val = str(in_val).strip()
                 if " to " in val:
                     val = val.split(" to ")[0].strip()
                 try:
@@ -299,7 +307,40 @@ class BookingInquiryService:
                     except ValueError:
                         pass
 
-            check_out = check_in + timedelta(days=1)
+            # 2. Parse check_out date
+            if tdate_end:
+                end_val = str(tdate_end).strip()
+                try:
+                    co_dt = datetime.fromisoformat(end_val.replace("Z", "+00:00"))
+                    check_out = co_dt.date()
+                except ValueError:
+                    try:
+                        check_out = datetime.strptime(end_val[:10], "%Y-%m-%d").date()
+                    except ValueError:
+                        pass
+            elif tdate_raw and " to " in str(tdate_raw):
+                parts = str(tdate_raw).split(" to ")
+                try:
+                    co_dt = datetime.fromisoformat(parts[1].strip().replace("Z", "+00:00"))
+                    check_out = co_dt.date()
+                except (ValueError, IndexError):
+                    try:
+                        check_out = datetime.strptime(parts[1].strip()[:10], "%Y-%m-%d").date()
+                    except (ValueError, IndexError):
+                        pass
+            elif tdate_str and " to " in str(tdate_str):
+                parts = str(tdate_str).split(" to ")
+                try:
+                    co_dt = datetime.fromisoformat(parts[1].strip().replace("Z", "+00:00"))
+                    check_out = co_dt.date()
+                except (ValueError, IndexError):
+                    try:
+                        check_out = datetime.strptime(parts[1].strip()[:10], "%Y-%m-%d").date()
+                    except (ValueError, IndexError):
+                        pass
+
+            if check_out is None or check_out <= check_in:
+                check_out = check_in + timedelta(days=1)
 
             # Find room type and available room units
             room_type = self.db.query(StayRoomType).filter(StayRoomType.property_id == prop.id).first()
@@ -312,15 +353,46 @@ class BookingInquiryService:
             except (ValueError, TypeError):
                 requested_room_count = 1
 
-            room_units = self.db.query(StayRoomUnit).filter(
+            # --- Fix 2: Availability-aware room allocation (prevents double-booking) ---
+            inactive_statuses = {"maintenance", "blocked", "inactive", "out_of_service"}
+            all_units = self.db.query(StayRoomUnit).filter(
                 StayRoomUnit.property_id == prop.id,
                 StayRoomUnit.room_type_id == room_type.id
             ).all()
 
-            if not room_units:
+            if not all_units:
                 continue
 
-            units_to_allocate = room_units[:requested_room_count]
+            available_units = []
+            for unit in all_units:
+                if unit.status.lower() in inactive_statuses:
+                    continue
+                has_booking = self.db.query(StayBookingRoom.id).join(
+                    StayBooking, StayBookingRoom.stay_booking_id == StayBooking.id
+                ).join(Booking, StayBooking.booking_id == Booking.id).filter(
+                    StayBookingRoom.room_unit_id == unit.id,
+                    StayBookingRoom.check_in_date < check_out,
+                    StayBookingRoom.check_out_date > check_in,
+                    StayBooking.status != StayBookingStatus.CANCELLED,
+                    Booking.status.in_(["pending", "confirmed", "completed"]),
+                ).first() is not None
+                if has_booking:
+                    continue
+                has_block = self.db.query(StayRoomBlock.id).filter(
+                    StayRoomBlock.room_unit_id == unit.id,
+                    StayRoomBlock.status == StayRoomBlockStatus.ACTIVE,
+                    StayRoomBlock.start_date < check_out,
+                    StayRoomBlock.end_date > check_in,
+                ).first() is not None
+                if has_block:
+                    continue
+                available_units.append(unit)
+
+            if not available_units:
+                logger.warning(f"No available room units for property {prop.name} on {check_in}-{check_out}")
+                continue
+
+            units_to_allocate = available_units[:requested_room_count]
 
             try:
                 parent_booking = Booking(
@@ -365,11 +437,24 @@ class BookingInquiryService:
                         metadata_json={}
                     )
                     self.db.add(stay_booking_room)
+
+                self.db.flush()
                 self.db.commit()
+
+                # --- Fix 4: Refresh calendar so availability search reflects this booking ---
+                try:
+                    from app.services.stay_inventory_service import StayInventoryService
+                    inv_service = StayInventoryService(self.db)
+                    inv_service.refresh_calendar(prop.id, {room_type.id}, check_in, check_out - timedelta(days=1))
+                    self.db.commit()
+                except Exception as cal_ex:
+                    logger.error(f"Error refreshing calendar for stay booking on {prop.name}: {cal_ex}")
+
                 logger.info(f"Auto-provisioned StayBooking with {len(units_to_allocate)} room units for inquiry {db_inquiry.reference} on property {prop.name}")
             except Exception as ex:
                 self.db.rollback()
                 logger.error(f"Failed to auto-provision StayBooking for inquiry {db_inquiry.reference}: {str(ex)}")
+
 
 
 def get_booking_inquiry_service(db: Session) -> BookingInquiryService:

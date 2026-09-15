@@ -117,10 +117,23 @@ def list_vendor_booking_inquiries(
 
         formatted_items = []
         for item in visible_cart_items:
+            tdate_raw = item.get("travel_date_raw") or item.get("travelDateRaw")
+            tdate = item.get("travel_date") or item.get("travelDate")
+            tdate_end = item.get("travel_date_end") or item.get("travelDateEnd")
+
+            display_date = tdate_raw
+            if not display_date:
+                if tdate and tdate_end:
+                    display_date = f"{str(tdate)[:10]} to {str(tdate_end)[:10]}"
+                else:
+                    display_date = tdate
+
             formatted_items.append({
                 "listingId": str(item.get("listing_id") or item.get("listingId") or ""),
                 "title": item.get("title") or "Service Listing",
-                "travelDate": item.get("travel_date") or item.get("travelDate"),
+                "travelDate": display_date,
+                "travelDateEnd": str(tdate_end) if tdate_end else None,
+                "travelDateRaw": display_date,
                 "travelCount": item.get("travel_count") or item.get("travelCount") or 1,
                 "price": float(item.get("price") or 0.0),
                 "baseCurrency": item.get("base_currency") or item.get("baseCurrency") or "USD"

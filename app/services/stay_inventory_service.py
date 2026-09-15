@@ -347,7 +347,7 @@ class StayInventoryService:
 
             nightly_rate = Decimal(room_type.base_price or 0)
             room_entries = grouped_entries.get(room_type.id, [])
-            total_listed_units = len(room_type.room_units) if room_type.room_units else 1
+            total_listed_units = len(room_type.room_units) if room_type.room_units else 0
             available_count = min([entry.available_units for entry in room_entries], default=total_listed_units) if room_entries else total_listed_units
 
             nightly_prices = [
@@ -613,6 +613,7 @@ class StayInventoryService:
             .filter(
                 StayRoomUnit.property_id == real_property_id,
                 StayRoomUnit.room_type_id.in_(room_type_id_list),
+                ~StayRoomUnit.status.in_(list(INACTIVE_UNIT_STATUSES)),
             )
             .group_by(StayRoomUnit.room_type_id)
             .all()
@@ -689,7 +690,7 @@ class StayInventoryService:
 
         for room_type_id in room_type_id_list:
             unit_count = total_units_by_type.get(room_type_id, 0)
-            total_units = max(1, unit_count)
+            total_units = unit_count
             for night in nights:
                 booked_units = booked_counts.get((room_type_id, night), 0)
                 blocked_units = len(blocked_units_by_day.get((room_type_id, night), set()))
@@ -949,6 +950,7 @@ class StayInventoryService:
             .filter(
                 StayRoomUnit.property_id == property_id,
                 StayRoomUnit.room_type_id.in_(room_type_id_list),
+                ~StayRoomUnit.status.in_(list(INACTIVE_UNIT_STATUSES)),
             )
             .group_by(StayRoomUnit.room_type_id)
             .all()
@@ -1006,7 +1008,7 @@ class StayInventoryService:
 
         for room_type_id, night in all_keys:
             unit_count = total_units_by_type.get(room_type_id, 0)
-            total_units = max(1, unit_count)
+            total_units = unit_count
             booked_units = booked_counts.get((room_type_id, night), 0)
             blocked_units = len(blocked_units_by_day.get((room_type_id, night), set()))
             avail_units = max(total_units - booked_units - blocked_units, 0)

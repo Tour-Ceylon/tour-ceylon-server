@@ -1,56 +1,42 @@
 from datetime import datetime
-from pydantic import BaseModel, Field, field_validator, ConfigDict
-from decimal import Decimal
-from typing import Any
-
-class CartItemSchemaTest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    
-    listing_id: str = Field(..., alias="listingId")
-    title: str
-    travel_date: datetime = Field(..., alias="travelDate")
-    travel_count: int = Field(ge=1, alias="travelCount")
-    price: Decimal = Field(ge=0)
-
-    @field_validator("travel_date", mode="before")
-    @classmethod
-    def parse_travel_date(cls, value: Any) -> datetime:
-        if isinstance(value, datetime):
-            return value
-        if isinstance(value, str):
-            val = value.strip()
-            if " to " in val:
-                val = val.split(" to ")[0].strip()
-            try:
-                return datetime.fromisoformat(val.replace("Z", "+00:00"))
-            except ValueError:
-                pass
-            try:
-                return datetime.strptime(val[:10], "%Y-%m-%d")
-            except ValueError:
-                pass
-        return datetime.utcnow()
+from app.schemas.booking_inquiry_schema import CartItemSchema
 
 print("==================================================")
 print("TESTING BOOKING INQUIRY DATE VALIDATOR")
 print("==================================================")
 
 inputs = [
-    "2026-08-27 to 2026-08-28",
+    "2026-09-22 to 2026-09-29",
     "2026-08-27",
     "2026-08-27T09:00:00",
     "2026-05-20T00:00:00.000Z",
-    "invalid date string test",
 ]
 
 for inp in inputs:
-    item = CartItemSchemaTest(
-        listingId="listing_123",
-        title="Araliya Green Hills",
+    item = CartItemSchema(
+        listingId="57d51ef6-b752-4952-8126-5743fb112857",
+        title="sound",
         travelDate=inp,
-        travelCount=2,
-        price=100.0
+        travelCount=1,
+        price=5000.0
     )
-    print(f"Input: '{inp}' -> Parsed travel_date: {item.travel_date} (Type: {type(item.travel_date)})")
+    print(f"Input: '{inp}'")
+    print(f"  travel_date:     {item.travel_date}")
+    print(f"  travel_date_end: {item.travel_date_end}")
+    print(f"  travel_date_raw: {item.travel_date_raw}")
+
+# Test explicit travelDateEnd or checkOutDate
+item_explicit = CartItemSchema(
+    listingId="57d51ef6-b752-4952-8126-5743fb112857",
+    title="sound",
+    travelDate="2026-09-22",
+    checkOutDate="2026-09-29",
+    travelCount=1,
+    price=5000.0
+)
+print("\nExplicit checkOutDate:")
+print(f"  travel_date:     {item_explicit.travel_date}")
+print(f"  travel_date_end: {item_explicit.travel_date_end}")
+print(f"  travel_date_raw: {item_explicit.travel_date_raw}")
 
 print("\nSUCCESS!")

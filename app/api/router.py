@@ -125,6 +125,9 @@ api_router.include_router(
     notifications.router,
     prefix="/notifications",
     tags=["notifications"]
+)
+
+api_router.include_router(
     drivers.router,
     tags=["drivers"]
 )
