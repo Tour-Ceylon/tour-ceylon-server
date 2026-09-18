@@ -62,15 +62,30 @@ class StayInventoryService:
         self.db = db
 
     def get_property(self, property_id: UUID) -> StayProperty | None:
-        return (
+        prop = (
             self.db.query(StayProperty)
             .options(
                 joinedload(StayProperty.room_types).joinedload(StayRoomType.room_units),
                 joinedload(StayProperty.stay_bookings).joinedload(StayBooking.rooms),
             )
-            .filter(StayProperty.id == property_id)
+            .filter((StayProperty.id == property_id) | (StayProperty.listing_id == property_id))
             .first()
         )
+        if prop is None:
+            from app.repositories.stay_repo import StayRepository
+            repo = StayRepository(self.db)
+            prop = repo.get_by_id(property_id)
+            if prop:
+                prop = (
+                    self.db.query(StayProperty)
+                    .options(
+                        joinedload(StayProperty.room_types).joinedload(StayRoomType.room_units),
+                        joinedload(StayProperty.stay_bookings).joinedload(StayBooking.rooms),
+                    )
+                    .filter(StayProperty.id == prop.id)
+                    .first()
+                )
+        return prop
 
     def list_inventory(self, property_id: UUID) -> StayInventoryResponse:
         property_record = self._require_property(property_id)
@@ -168,7 +183,16 @@ class StayInventoryService:
 
     def create_room_block(self, property_id: UUID, actor: User, payload: StayRoomBlockCreate) -> StayRoomBlock:
         started_at = time.perf_counter()
-        room_unit = self._require_room_unit(property_id, payload.room_unit_id)
+        property_record = self._require_property(property_id)
+        real_property_id = property_record.id
+
+        if payload.room_unit_id is None:
+            unit = self.db.query(StayRoomUnit).filter(StayRoomUnit.property_id == real_property_id).first()
+            if unit is None:
+                raise ValueError("No room units found for this property to block")
+            payload.room_unit_id = unit.id
+
+        room_unit = self._require_room_unit(real_property_id, payload.room_unit_id)
         if room_unit.status.lower() in INACTIVE_UNIT_STATUSES:
             raise ValueError("Cannot block an inactive room unit")
 
@@ -190,7 +214,7 @@ class StayInventoryService:
             raise ValueError("Cannot block a room that is already booked in that date range")
 
         block = StayRoomBlock(
-            property_id=property_id,
+            property_id=real_property_id,
             room_unit_id=payload.room_unit_id,
             start_date=payload.start_date,
             end_date=payload.end_date,
@@ -202,12 +226,12 @@ class StayInventoryService:
         )
         self.db.add(block)
         self.db.flush()
-        self.refresh_calendar(property_id, {room_unit.room_type_id}, payload.start_date, payload.end_date - timedelta(days=1))
+        self.refresh_calendar(real_property_id, {room_unit.room_type_id}, payload.start_date, payload.end_date - timedelta(days=1))
         self.db.commit()
         self.db.refresh(block)
         logger.info(
             "stay_inventory.create_room_block_timing property_id=%s room_type_id=%s room_unit_id=%s start_date=%s end_date=%s elapsed_ms=%.2f",
-            property_id,
+            real_property_id,
             room_unit.room_type_id,
             payload.room_unit_id,
             payload.start_date,
@@ -218,21 +242,24 @@ class StayInventoryService:
 
     def release_room_block(self, property_id: UUID, block_id: UUID) -> StayRoomBlock:
         started_at = time.perf_counter()
+        property_record = self._require_property(property_id)
+        real_property_id = property_record.id
+
         block = (
             self.db.query(StayRoomBlock)
-            .filter(StayRoomBlock.id == block_id, StayRoomBlock.property_id == property_id)
+            .filter(StayRoomBlock.id == block_id, StayRoomBlock.property_id == real_property_id)
             .first()
         )
         if block is None:
             raise ValueError("Room block not found")
         block.status = StayRoomBlockStatus.RELEASED
-        room_unit = self._require_room_unit(property_id, block.room_unit_id)
-        self.refresh_calendar(property_id, {room_unit.room_type_id}, block.start_date, block.end_date - timedelta(days=1))
+        room_unit = self._require_room_unit(real_property_id, block.room_unit_id)
+        self.refresh_calendar(real_property_id, {room_unit.room_type_id}, block.start_date, block.end_date - timedelta(days=1))
         self.db.commit()
         self.db.refresh(block)
         logger.info(
             "stay_inventory.release_room_block_timing property_id=%s room_type_id=%s block_id=%s start_date=%s end_date=%s elapsed_ms=%.2f",
-            property_id,
+            real_property_id,
             room_unit.room_type_id,
             block_id,
             block.start_date,
@@ -250,21 +277,23 @@ class StayInventoryService:
     ) -> StayCalendarResponse:
         started_at = time.perf_counter()
         property_record = self._require_property(property_id)
+        real_property_id = property_record.id
+
         room_type_ids = {room_type.id for room_type in property_record.room_types or []}
         if room_type_id is not None:
-            self._require_room_type(property_id, room_type_id)
+            self._require_room_type(real_property_id, room_type_id)
             room_type_ids = {room_type_id}
         if not room_type_ids:
-            return StayCalendarResponse(propertyId=property_id, entries=[])
+            return StayCalendarResponse(propertyId=real_property_id, entries=[])
 
-        entries_by_type = self._load_calendar_entries(property_id, room_type_ids, start_date, end_date)
+        entries_by_type = self._load_calendar_entries(real_property_id, room_type_ids, start_date, end_date)
         missing_spans = self._find_missing_calendar_spans(room_type_ids, start_date, end_date, entries_by_type)
         for missing_room_type_id, spans in missing_spans.items():
             for span_start, span_end in spans:
-                self.refresh_calendar(property_id, {missing_room_type_id}, span_start, span_end)
+                self.refresh_calendar(real_property_id, {missing_room_type_id}, span_start, span_end)
 
         if missing_spans:
-            entries_by_type = self._load_calendar_entries(property_id, room_type_ids, start_date, end_date)
+            entries_by_type = self._load_calendar_entries(real_property_id, room_type_ids, start_date, end_date)
 
         entries = [
             StayAvailabilityNightResponse(
@@ -280,7 +309,7 @@ class StayInventoryService:
         ]
         logger.info(
             "stay_inventory.get_calendar_timing property_id=%s room_type_count=%s start_date=%s end_date=%s missing_span_count=%s result_count=%s elapsed_ms=%.2f",
-            property_id,
+            real_property_id,
             len(room_type_ids),
             start_date,
             end_date,
@@ -288,36 +317,29 @@ class StayInventoryService:
             len(entries),
             (time.perf_counter() - started_at) * 1000,
         )
-        return StayCalendarResponse(propertyId=property_id, entries=entries)
+        return StayCalendarResponse(propertyId=real_property_id, entries=entries)
 
     def search_availability(self, payload: StayAvailabilitySearchRequest) -> StayAvailabilitySearchResponse:
         property_record = self._require_property(payload.property_id)
+        real_property_id = property_record.id
+
         room_types = sorted(property_record.room_types or [], key=lambda item: item.name.lower())
         if payload.room_type_id is not None:
             room_types = [room_type for room_type in room_types if room_type.id == payload.room_type_id]
 
-        room_type_ids = {room_type.id for room_type in room_types}
-        if room_type_ids:
-            self.refresh_calendar(payload.property_id, room_type_ids, payload.check_in_date, payload.check_out_date - timedelta(days=1))
+        end_date = payload.check_out_date if payload.check_out_date > payload.check_in_date else payload.check_in_date + timedelta(days=1)
+        nights = max(1, (end_date - payload.check_in_date).days)
+        stay_end_inclusive = end_date - timedelta(days=1)
 
+        room_type_ids = {room_type.id for room_type in room_types}
         grouped_entries: dict[UUID, list[StayRoomTypeCalendar]] = defaultdict(list)
+
         if room_type_ids:
-            calendar_entries = (
-                self.db.query(StayRoomTypeCalendar)
-                .filter(
-                    StayRoomTypeCalendar.property_id == payload.property_id,
-                    StayRoomTypeCalendar.room_type_id.in_(list(room_type_ids)),
-                    StayRoomTypeCalendar.stay_date >= payload.check_in_date,
-                    StayRoomTypeCalendar.stay_date < payload.check_out_date,
-                )
-                .order_by(StayRoomTypeCalendar.stay_date.asc())
-                .all()
-            )
-            for entry in calendar_entries:
-                grouped_entries[entry.room_type_id].append(entry)
+            avail_map = self._compute_nightly_availability(real_property_id, room_type_ids, payload.check_in_date, stay_end_inclusive)
+            for (rt_id, stay_d), entry in sorted(avail_map.items(), key=lambda x: x[0][1]):
+                grouped_entries[rt_id].append(entry)
 
         results: list[StayAvailabilityRoomTypeResponse] = []
-        nights = (payload.check_out_date - payload.check_in_date).days
         for room_type in room_types:
             max_guests = self._safe_int(room_type.max_guests)
             if max_guests is not None and payload.guests > max_guests:
@@ -325,9 +347,9 @@ class StayInventoryService:
 
             nightly_rate = Decimal(room_type.base_price or 0)
             room_entries = grouped_entries.get(room_type.id, [])
-            if len(room_entries) != nights:
-                continue
-            available_count = min(entry.available_units for entry in room_entries) if room_entries else 0
+            total_listed_units = len(room_type.room_units) if room_type.room_units else 0
+            available_count = min([entry.available_units for entry in room_entries], default=total_listed_units) if room_entries else total_listed_units
+
             nightly_prices = [
                 StayAvailabilityNightResponse(
                     date=entry.stay_date,
@@ -358,6 +380,51 @@ class StayInventoryService:
             checkOutDate=payload.check_out_date,
             roomTypes=results,
         )
+
+    def get_available_stay_property_ids(self, start_date: date, end_date: date) -> set[UUID]:
+        """
+        Returns a set of StayProperty.id and StayProperty.listing_id that have at least
+        1 unbooked & non-blocked room unit for every night in [start_date, end_date).
+        """
+        properties = self.db.query(StayProperty).options(
+            joinedload(StayProperty.room_types)
+        ).all()
+
+        available_listing_ids = set()
+        nights = (end_date - start_date).days
+        if nights <= 0:
+            return set()
+
+        stay_end_inclusive = end_date - timedelta(days=1)
+
+        for prop in properties:
+            room_type_ids = {rt.id for rt in (prop.room_types or [])}
+            if not room_type_ids:
+                if prop.listing_id:
+                    available_listing_ids.add(prop.listing_id)
+                available_listing_ids.add(prop.id)
+                continue
+
+            avail_map = self._compute_nightly_availability(prop.id, room_type_ids, start_date, stay_end_inclusive)
+
+            entries_by_date: dict[date, int] = defaultdict(int)
+            for (rt_id, stay_d), entry in avail_map.items():
+                entries_by_date[stay_d] += entry.available_units
+
+            has_capacity_all_nights = True
+            current = start_date
+            while current < end_date:
+                if entries_by_date.get(current, 0) <= 0:
+                    has_capacity_all_nights = False
+                    break
+                current += timedelta(days=1)
+
+            if has_capacity_all_nights:
+                if prop.listing_id:
+                    available_listing_ids.add(prop.listing_id)
+                available_listing_ids.add(prop.id)
+
+        return available_listing_ids
 
     def create_booking(self, payload: StayBookingCreate, *, confirm: bool = False) -> StayBooking:
         property_record = self._require_property(payload.property_id)
@@ -532,6 +599,11 @@ class StayInventoryService:
         if not room_type_ids or end_date < start_date:
             return
         started_at = time.perf_counter()
+        property_record = self.get_property(property_id)
+        if property_record is None:
+            return
+        real_property_id = property_record.id
+
         room_type_id_list = list(room_type_ids)
         nights = self._night_dates(start_date, end_date + timedelta(days=1))
 
@@ -539,8 +611,9 @@ class StayInventoryService:
         for room_type_id, total_units in (
             self.db.query(StayRoomUnit.room_type_id, func.count(StayRoomUnit.id))
             .filter(
-                StayRoomUnit.property_id == property_id,
+                StayRoomUnit.property_id == real_property_id,
                 StayRoomUnit.room_type_id.in_(room_type_id_list),
+                ~StayRoomUnit.status.in_(list(INACTIVE_UNIT_STATUSES)),
             )
             .group_by(StayRoomUnit.room_type_id)
             .all()
@@ -550,7 +623,7 @@ class StayInventoryService:
         existing_entries = (
             self.db.query(StayRoomTypeCalendar)
             .filter(
-                StayRoomTypeCalendar.property_id == property_id,
+                StayRoomTypeCalendar.property_id == real_property_id,
                 StayRoomTypeCalendar.room_type_id.in_(room_type_id_list),
                 StayRoomTypeCalendar.stay_date >= start_date,
                 StayRoomTypeCalendar.stay_date <= end_date,
@@ -572,7 +645,7 @@ class StayInventoryService:
             .join(StayBooking, StayBookingRoom.stay_booking_id == StayBooking.id)
             .join(Booking, StayBooking.booking_id == Booking.id)
             .filter(
-                StayBooking.property_id == property_id,
+                StayBooking.property_id == real_property_id,
                 StayBookingRoom.room_type_id.in_(room_type_id_list),
                 StayBookingRoom.check_in_date <= end_date,
                 StayBookingRoom.check_out_date > start_date,
@@ -584,8 +657,9 @@ class StayInventoryService:
         for room_type_id, check_in_date, check_out_date in booking_rows:
             overlap_start = max(start_date, check_in_date)
             overlap_end = min(end_date + timedelta(days=1), check_out_date)
-            for night in self._night_dates(overlap_start, overlap_end):
-                booked_counts[(room_type_id, night)] += 1
+            if overlap_start < overlap_end:
+                for night in self._night_dates(overlap_start, overlap_end):
+                    booked_counts[(room_type_id, night)] += 1
 
         blocked_units_by_day: dict[tuple[UUID, date], set[UUID]] = defaultdict(set)
         block_rows = (
@@ -597,7 +671,7 @@ class StayInventoryService:
             )
             .join(StayRoomUnit, StayRoomBlock.room_unit_id == StayRoomUnit.id)
             .filter(
-                StayRoomBlock.property_id == property_id,
+                StayRoomBlock.property_id == real_property_id,
                 StayRoomUnit.room_type_id.in_(room_type_id_list),
                 StayRoomBlock.status == StayRoomBlockStatus.ACTIVE,
                 StayRoomBlock.start_date <= end_date,
@@ -611,31 +685,63 @@ class StayInventoryService:
             for night in self._night_dates(overlap_start, overlap_end):
                 blocked_units_by_day[(room_type_id, night)].add(room_unit_id)
 
+        values_to_upsert = []
+        now_dt = datetime.utcnow()
         touched_entry_count = 0
-        for room_type_id in room_type_id_list:
-            total_units = total_units_by_type.get(room_type_id, 0)
-            for night in nights:
-                entry = existing_entries_by_key.get((room_type_id, night))
-                if entry is None:
-                    entry = StayRoomTypeCalendar(
-                        property_id=property_id,
-                        room_type_id=room_type_id,
-                        stay_date=night,
-                    )
-                    self.db.add(entry)
-                    existing_entries_by_key[(room_type_id, night)] = entry
 
+        for room_type_id in room_type_id_list:
+            unit_count = total_units_by_type.get(room_type_id, 0)
+            total_units = unit_count
+            for night in nights:
                 booked_units = booked_counts.get((room_type_id, night), 0)
                 blocked_units = len(blocked_units_by_day.get((room_type_id, night), set()))
-                entry.total_units = total_units
-                entry.booked_units = booked_units
-                entry.blocked_units = blocked_units
-                entry.available_units = max(total_units - booked_units - blocked_units, 0)
+                available_units = max(total_units - booked_units - blocked_units, 0)
+
+                existing = existing_entries_by_key.get((room_type_id, night))
+                if existing:
+                    existing.total_units = total_units
+                    existing.booked_units = booked_units
+                    existing.blocked_units = blocked_units
+                    existing.available_units = available_units
+                else:
+                    values_to_upsert.append({
+                        "id": uuid4(),
+                        "property_id": real_property_id,
+                        "room_type_id": room_type_id,
+                        "stay_date": night,
+                        "total_units": total_units,
+                        "booked_units": booked_units,
+                        "blocked_units": blocked_units,
+                        "available_units": available_units,
+                        "created_at": now_dt,
+                        "updated_at": now_dt,
+                    })
                 touched_entry_count += 1
+
+        if values_to_upsert:
+            try:
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
+                stmt = pg_insert(StayRoomTypeCalendar).values(values_to_upsert)
+                stmt = stmt.on_conflict_do_update(
+                    constraint="uq_stay_room_type_calendar_date",
+                    set_={
+                        "total_units": stmt.excluded.total_units,
+                        "booked_units": stmt.excluded.booked_units,
+                        "blocked_units": stmt.excluded.blocked_units,
+                        "available_units": stmt.excluded.available_units,
+                        "updated_at": now_dt,
+                    },
+                )
+                self.db.execute(stmt)
+            except Exception:
+                for val in values_to_upsert:
+                    entry = StayRoomTypeCalendar(**val)
+                    self.db.merge(entry)
+
         self.db.flush()
         logger.info(
             "stay_inventory.refresh_calendar_timing property_id=%s room_type_count=%s start_date=%s end_date=%s booking_row_count=%s block_row_count=%s touched_entry_count=%s elapsed_ms=%.2f",
-            property_id,
+            real_property_id,
             len(room_type_id_list),
             start_date,
             end_date,
@@ -811,6 +917,115 @@ class StayInventoryService:
             "roomUnits": [StayRoomUnitResponse.model_validate(room).model_dump(by_alias=True) for room in room_type.room_units or []],
         }
 
+    def _compute_nightly_availability(
+        self,
+        property_id: UUID,
+        room_type_ids: set[UUID],
+        start_date: date,
+        end_date: date,
+    ) -> dict[tuple[UUID, date], StayRoomTypeCalendar]:
+        room_type_id_list = list(room_type_ids)
+        nights = self._night_dates(start_date, end_date + timedelta(days=1))
+
+        existing_entries = (
+            self.db.query(StayRoomTypeCalendar)
+            .filter(
+                StayRoomTypeCalendar.property_id == property_id,
+                StayRoomTypeCalendar.room_type_id.in_(room_type_id_list),
+                StayRoomTypeCalendar.stay_date >= start_date,
+                StayRoomTypeCalendar.stay_date <= end_date,
+            )
+            .all()
+        )
+        all_keys = [
+            (rt_id, n)
+            for rt_id in room_type_id_list
+            for n in nights
+        ]
+
+        result: dict[tuple[UUID, date], StayRoomTypeCalendar] = {}
+
+        total_units_by_type = {rt_id: 0 for rt_id in room_type_id_list}
+        for rt_id, total_units in (
+            self.db.query(StayRoomUnit.room_type_id, func.count(StayRoomUnit.id))
+            .filter(
+                StayRoomUnit.property_id == property_id,
+                StayRoomUnit.room_type_id.in_(room_type_id_list),
+                ~StayRoomUnit.status.in_(list(INACTIVE_UNIT_STATUSES)),
+            )
+            .group_by(StayRoomUnit.room_type_id)
+            .all()
+        ):
+            total_units_by_type[rt_id] = total_units or 0
+
+        booked_counts: dict[tuple[UUID, date], int] = defaultdict(int)
+        booking_rows = (
+            self.db.query(
+                StayBookingRoom.room_type_id,
+                StayBookingRoom.check_in_date,
+                StayBookingRoom.check_out_date,
+            )
+            .join(StayBooking, StayBookingRoom.stay_booking_id == StayBooking.id)
+            .join(Booking, StayBooking.booking_id == Booking.id)
+            .filter(
+                StayBooking.property_id == property_id,
+                StayBookingRoom.room_type_id.in_(room_type_id_list),
+                StayBookingRoom.check_in_date <= end_date,
+                StayBookingRoom.check_out_date > start_date,
+                StayBooking.status != StayBookingStatus.CANCELLED,
+                Booking.status.in_(list(ACTIVE_PARENT_BOOKING_STATUSES)),
+            )
+            .all()
+        )
+        for room_type_id, check_in_date, check_out_date in booking_rows:
+            overlap_start = max(start_date, check_in_date)
+            overlap_end = min(end_date + timedelta(days=1), check_out_date)
+            for night in self._night_dates(overlap_start, overlap_end):
+                booked_counts[(room_type_id, night)] += 1
+
+        blocked_units_by_day: dict[tuple[UUID, date], set[UUID]] = defaultdict(set)
+        block_rows = (
+            self.db.query(
+                StayRoomUnit.room_type_id,
+                StayRoomBlock.room_unit_id,
+                StayRoomBlock.start_date,
+                StayRoomBlock.end_date,
+            )
+            .join(StayRoomUnit, StayRoomBlock.room_unit_id == StayRoomUnit.id)
+            .filter(
+                StayRoomBlock.property_id == property_id,
+                StayRoomUnit.room_type_id.in_(room_type_id_list),
+                StayRoomBlock.status == StayRoomBlockStatus.ACTIVE,
+                StayRoomBlock.start_date <= end_date,
+                StayRoomBlock.end_date > start_date,
+            )
+            .all()
+        )
+        for room_type_id, room_unit_id, block_start_date, block_end_date in block_rows:
+            overlap_start = max(start_date, block_start_date)
+            overlap_end = min(end_date + timedelta(days=1), block_end_date)
+            for night in self._night_dates(overlap_start, overlap_end):
+                blocked_units_by_day[(room_type_id, night)].add(room_unit_id)
+
+        for room_type_id, night in all_keys:
+            unit_count = total_units_by_type.get(room_type_id, 0)
+            total_units = unit_count
+            booked_units = booked_counts.get((room_type_id, night), 0)
+            blocked_units = len(blocked_units_by_day.get((room_type_id, night), set()))
+            avail_units = max(total_units - booked_units - blocked_units, 0)
+
+            result[(room_type_id, night)] = StayRoomTypeCalendar(
+                property_id=property_id,
+                room_type_id=room_type_id,
+                stay_date=night,
+                total_units=total_units,
+                booked_units=booked_units,
+                blocked_units=blocked_units,
+                available_units=avail_units,
+            )
+
+        return result
+
     def _load_calendar_entries(
         self,
         property_id: UUID,
@@ -874,10 +1089,12 @@ class StayInventoryService:
         return property_record
 
     def _require_room_type(self, property_id: UUID, room_type_id: UUID) -> StayRoomType:
+        prop = self.get_property(property_id)
+        real_prop_id = prop.id if prop else property_id
         room_type = (
             self.db.query(StayRoomType)
             .options(joinedload(StayRoomType.room_units), joinedload(StayRoomType.booking_rooms))
-            .filter(StayRoomType.id == room_type_id, StayRoomType.property_id == property_id)
+            .filter(StayRoomType.id == room_type_id, StayRoomType.property_id == real_prop_id)
             .first()
         )
         if room_type is None:
@@ -885,10 +1102,12 @@ class StayInventoryService:
         return room_type
 
     def _require_room_unit(self, property_id: UUID, room_unit_id: UUID) -> StayRoomUnit:
+        prop = self.get_property(property_id)
+        real_prop_id = prop.id if prop else property_id
         room_unit = (
             self.db.query(StayRoomUnit)
             .options(joinedload(StayRoomUnit.booking_rooms))
-            .filter(StayRoomUnit.id == room_unit_id, StayRoomUnit.property_id == property_id)
+            .filter(StayRoomUnit.id == room_unit_id, StayRoomUnit.property_id == real_prop_id)
             .first()
         )
         if room_unit is None:

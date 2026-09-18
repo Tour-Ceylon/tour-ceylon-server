@@ -35,10 +35,10 @@ class BookingInquiryService:
             # Validate cart items pricing consistency
             self._validate_pricing(inquiry_data)
             
-            # Create the inquiry
+            # Create the inquiry (Pending vendor review & confirmation)
             db_inquiry = self.repository.create(inquiry_data)
             
-            logger.info(f"Created booking inquiry {db_inquiry.reference} for {db_inquiry.email}")
+            logger.info(f"Created booking inquiry {db_inquiry.reference} for {db_inquiry.email} (Pending Vendor Review)")
             
             # Convert to response schema
             return BookingInquiryResponse(
@@ -207,7 +207,7 @@ class BookingInquiryService:
             
             # Process field values
             for key, value in item_dict.items():
-                if key == 'travel_date' and isinstance(value, str):
+                if key in ('travel_date', 'travel_date_end') and isinstance(value, str):
                     try:
                         # Parse ISO datetime string back to datetime object
                         item_dict[key] = datetime.fromisoformat(value.replace('Z', '+00:00'))
@@ -251,6 +251,243 @@ class BookingInquiryService:
             created_at=db_inquiry.created_at,
             updated_at=db_inquiry.updated_at
         )
+
+    def _auto_provision_stay_bookings(self, db_inquiry: BookingInquiry) -> None:
+        """
+        Auto-allocate room units and create StayBooking + StayBookingRoom records
+        when a client places a stay booking inquiry.
+        """
+        from app.models.stay import StayProperty, StayRoomType, StayRoomUnit, StayBooking, StayBookingRoom, StayRoomBlock
+        from app.models.booking import Booking
+        from app.models.user import User
+        from app.models.enum import StayBookingStatus, StayRoomBlockStatus, BookingStatus, PaymentTransactionStatus, CurrencyCode
+        from datetime import datetime, timedelta, date
+        from decimal import Decimal
+        from uuid import UUID
+
+        system_user = self.db.query(User).first()
+
+        for item in db_inquiry.cart_items or []:
+            lid = item.get("listing_id")
+            if not lid:
+                continue
+            
+            prop = None
+            try:
+                prop_uuid = UUID(str(lid))
+                prop = self.db.query(StayProperty).filter(
+                    (StayProperty.id == prop_uuid) | (StayProperty.listing_id == prop_uuid)
+                ).first()
+            except ValueError:
+                pass
+
+            if not prop:
+                continue
+
+            # --- Fix 3: Parse date ranges properly for multi-night stays ---
+            tdate_raw = item.get("travel_date_raw") or item.get("travelDateRaw")
+            tdate_end = item.get("travel_date_end") or item.get("travelDateEnd")
+            tdate_str = item.get("travel_date") or item.get("travelDate")
+
+            check_in = date.today()
+            check_out = None
+
+            # 1. Parse check_in date
+            in_val = tdate_str or tdate_raw
+            if in_val:
+                val = str(in_val).strip()
+                if " to " in val:
+                    val = val.split(" to ")[0].strip()
+                try:
+                    dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+                    check_in = dt.date()
+                except ValueError:
+                    try:
+                        check_in = datetime.strptime(val[:10], "%Y-%m-%d").date()
+                    except ValueError:
+                        pass
+
+            # 2. Parse check_out date
+            if tdate_end:
+                end_val = str(tdate_end).strip()
+                try:
+                    co_dt = datetime.fromisoformat(end_val.replace("Z", "+00:00"))
+                    check_out = co_dt.date()
+                except ValueError:
+                    try:
+                        check_out = datetime.strptime(end_val[:10], "%Y-%m-%d").date()
+                    except ValueError:
+                        pass
+            elif tdate_raw and " to " in str(tdate_raw):
+                parts = str(tdate_raw).split(" to ")
+                try:
+                    co_dt = datetime.fromisoformat(parts[1].strip().replace("Z", "+00:00"))
+                    check_out = co_dt.date()
+                except (ValueError, IndexError):
+                    try:
+                        check_out = datetime.strptime(parts[1].strip()[:10], "%Y-%m-%d").date()
+                    except (ValueError, IndexError):
+                        pass
+            elif tdate_str and " to " in str(tdate_str):
+                parts = str(tdate_str).split(" to ")
+                try:
+                    co_dt = datetime.fromisoformat(parts[1].strip().replace("Z", "+00:00"))
+                    check_out = co_dt.date()
+                except (ValueError, IndexError):
+                    try:
+                        check_out = datetime.strptime(parts[1].strip()[:10], "%Y-%m-%d").date()
+                    except (ValueError, IndexError):
+                        pass
+
+            if check_out is None or check_out <= check_in:
+                check_out = check_in + timedelta(days=1)
+
+            # Extract the specific rooms selected from the frontend multi-room payload
+            selected_rooms = item.get("selectedRooms") or item.get("selected_rooms") or []
+            rooms_to_book = []
+            
+            if selected_rooms:
+                for sr in selected_rooms:
+                    qty = int(sr.get("qty") or 1)
+                    r_id = sr.get("roomId")
+                    rt = None
+                    if r_id:
+                        try:
+                            rt = self.db.query(StayRoomType).filter(
+                                StayRoomType.property_id == prop.id,
+                                (StayRoomType.id == UUID(r_id)) | (StayRoomType.metadata_json['sourceVariantId'].astext == r_id)
+                            ).first()
+                        except ValueError:
+                            pass
+                    if not rt:
+                        r_name = sr.get("roomName")
+                        if r_name:
+                            rt = self.db.query(StayRoomType).filter(
+                                StayRoomType.property_id == prop.id,
+                                StayRoomType.name.ilike(f"%{r_name.strip()}%")
+                            ).first()
+                    if not rt:
+                        rt = self.db.query(StayRoomType).filter(StayRoomType.property_id == prop.id).first()
+                    if rt:
+                        rooms_to_book.append({"room_type": rt, "qty": qty})
+            else:
+                rt = self.db.query(StayRoomType).filter(StayRoomType.property_id == prop.id).first()
+                if rt:
+                    try:
+                        qty = int(item.get("travel_count") or item.get("travelCount") or 1)
+                    except (ValueError, TypeError):
+                        qty = 1
+                    rooms_to_book.append({"room_type": rt, "qty": qty})
+
+            if not rooms_to_book:
+                continue
+
+            try:
+                parent_booking = Booking(
+                    booking_reference=db_inquiry.reference,
+                    user_id=system_user.id if system_user else None,
+                    status=BookingStatus.CONFIRMED,
+                    total_amount=Decimal(str(db_inquiry.total or 100)),
+                    currency=CurrencyCode.USD,
+                    payment_status=PaymentTransactionStatus.PENDING,
+                    booked_at=db_inquiry.created_at or datetime.utcnow(),
+                )
+                self.db.add(parent_booking)
+                self.db.flush()
+
+                stay_booking = StayBooking(
+                    booking_id=parent_booking.id,
+                    property_id=prop.id,
+                    status=StayBookingStatus.CONFIRMED,
+                    check_in_date=check_in,
+                    check_out_date=check_out,
+                    guest_name=f"{db_inquiry.first_name} {db_inquiry.last_name}",
+                    guest_email=db_inquiry.email,
+                    guest_phone=db_inquiry.phone,
+                    special_requests=db_inquiry.special_requests,
+                    metadata_json={"inquiry_reference": db_inquiry.reference}
+                )
+                self.db.add(stay_booking)
+                self.db.flush()
+
+                total_item_price = Decimal(str(item.get("price") or 100))
+                total_qty = sum(rb["qty"] for rb in rooms_to_book)
+                per_unit_rate = total_item_price / Decimal(str(max(1, total_qty)))
+
+                # Allocate units for each requested room type
+                inactive_statuses = {"maintenance", "blocked", "inactive", "out_of_service"}
+                units_to_allocate = []
+                for rb in rooms_to_book:
+                    room_type = rb["room_type"]
+                    requested_qty = rb["qty"]
+                    
+                    all_units = self.db.query(StayRoomUnit).filter(
+                        StayRoomUnit.property_id == prop.id,
+                        StayRoomUnit.room_type_id == room_type.id
+                    ).all()
+
+                    available_units = []
+                    for unit in all_units:
+                        if unit.status.lower() in inactive_statuses:
+                            continue
+                        has_booking = self.db.query(StayBookingRoom.id).join(
+                            StayBooking, StayBookingRoom.stay_booking_id == StayBooking.id
+                        ).join(Booking, StayBooking.booking_id == Booking.id).filter(
+                            StayBookingRoom.room_unit_id == unit.id,
+                            StayBookingRoom.check_in_date < check_out,
+                            StayBookingRoom.check_out_date > check_in,
+                            StayBooking.status != StayBookingStatus.CANCELLED,
+                            Booking.status.in_(["pending", "confirmed", "completed"]),
+                        ).first() is not None
+                        if has_booking:
+                            continue
+                        has_block = self.db.query(StayRoomBlock.id).filter(
+                            StayRoomBlock.room_unit_id == unit.id,
+                            StayRoomBlock.status == StayRoomBlockStatus.ACTIVE,
+                            StayRoomBlock.start_date < check_out,
+                            StayRoomBlock.end_date > check_in,
+                        ).first() is not None
+                        if has_block:
+                            continue
+                        available_units.append(unit)
+
+                    if not available_units:
+                        logger.warning(f"No available room units for {room_type.name} on {check_in}-{check_out}")
+                        continue
+
+                    units_to_allocate = available_units[:requested_qty]
+                    for unit in units_to_allocate:
+                        stay_booking_room = StayBookingRoom(
+                            stay_booking_id=stay_booking.id,
+                            room_unit_id=unit.id,
+                            room_type_id=room_type.id,
+                            check_in_date=check_in,
+                            check_out_date=check_out,
+                            nightly_rate=per_unit_rate,
+                            guests=1,
+                            metadata_json={}
+                        )
+                        self.db.add(stay_booking_room)
+                    self.db.flush()
+
+                self.db.flush()
+                self.db.commit()
+
+                # --- Fix 4: Refresh calendar so availability search reflects this booking ---
+                try:
+                    from app.services.stay_inventory_service import StayInventoryService
+                    inv_service = StayInventoryService(self.db)
+                    room_type_ids = {rb["room_type"].id for rb in rooms_to_book}
+                    inv_service.refresh_calendar(prop.id, room_type_ids, check_in, check_out - timedelta(days=1))
+                    self.db.commit()
+                except Exception as cal_ex:
+                    logger.error(f"Error refreshing calendar for stay booking on {prop.name}: {cal_ex}")
+
+                logger.info(f"Auto-provisioned StayBooking with {len(units_to_allocate)} room units for inquiry {db_inquiry.reference} on property {prop.name}")
+            except Exception as ex:
+                self.db.rollback()
+                logger.error(f"Failed to auto-provision StayBooking for inquiry {db_inquiry.reference}: {str(ex)}")
+
 
 
 def get_booking_inquiry_service(db: Session) -> BookingInquiryService:

@@ -129,3 +129,119 @@ def sync_user_metadata_to_clerk(
     except Exception as exc:
         logger.error("Failed to sync metadata to Clerk for user %s: %s", clerk_user_id, str(exc))
         return False
+def create_clerk_user(
+    email: str,
+    password: Optional[str] = None,
+    full_name: Optional[str] = None,
+    role: str = "VENDOR",
+    vendor_status: Optional[str] = None,
+    approved_categories: Optional[list] = None,
+    company_name: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Creates a user in Clerk via the Clerk Backend API with verified email and returns the clerk_user_id.
+    If the user already exists in Clerk, retrieves their clerk_user_id and syncs metadata.
+    """
+    secret_key = settings.CLERK_SECRET_KEY or os.getenv("CLERK_SECRET_KEY")
+    if not secret_key:
+        logger.warning("Clerk secret key is not set; skipping Clerk user creation.")
+        return None
+
+    base_url = os.getenv("CLERK_API_URL", "https://api.clerk.com/v1").rstrip("/")
+    url = f"{base_url}/users"
+
+    # Derive first name and last name
+    first_name = None
+    last_name = None
+    if full_name:
+        parts = full_name.strip().split(" ", 1)
+        first_name = parts[0]
+        if len(parts) > 1:
+            last_name = parts[1]
+
+    # Derive valid alphanumeric username
+    clean_prefix = "".join(c for c in email.split("@")[0] if c.isalnum() or c == "_")
+    if len(clean_prefix) < 4:
+        clean_prefix = f"user_{clean_prefix}"
+    username = clean_prefix[:30]
+
+    public_metadata: Dict[str, Any] = {
+        "role": role,
+    }
+    if vendor_status is not None:
+        public_metadata["vendorStatus"] = vendor_status
+    if approved_categories is not None:
+        public_metadata["approvedCategories"] = approved_categories
+    if company_name is not None:
+        public_metadata["company"] = company_name
+
+    payload: Dict[str, Any] = {
+        "email_address": [email],
+        "username": username,
+        "first_name": first_name,
+        "last_name": last_name,
+        "skip_password_checks": True,
+        "public_metadata": public_metadata,
+    }
+    if password:
+        payload["password"] = password
+    else:
+        payload["skip_password_requirement"] = True
+
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            response = client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {secret_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            
+            # Handle username collision by appending random suffix and retrying
+            if response.status_code == 422:
+                err_data = response.json()
+                err_str = str(err_data)
+                if "username" in err_str and "taken" in err_str:
+                    import random
+                    payload["username"] = f"{username[:24]}_{random.randint(1000, 9999)}"
+                    response = client.post(
+                        url,
+                        headers={
+                            "Authorization": f"Bearer {secret_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                    )
+
+            if response.status_code in (200, 201):
+                data = response.json()
+                clerk_id = data.get("id")
+                logger.info("Successfully created Clerk user: %s for %s", clerk_id, email)
+                return clerk_id
+
+            # If user already exists, lookup by email
+            logger.warning("Clerk user creation response %s: %s", response.status_code, response.text)
+            lookup_res = client.get(
+                f"{base_url}/users",
+                headers={"Authorization": f"Bearer {secret_key}"},
+                params={"email_address": [email]},
+            )
+            if lookup_res.status_code == 200:
+                users_list = lookup_res.json()
+                if users_list and len(users_list) > 0:
+                    clerk_id = users_list[0]["id"]
+                    sync_user_metadata_to_clerk(
+                        clerk_user_id=clerk_id,
+                        role=role,
+                        vendor_status=vendor_status,
+                        approved_categories=approved_categories,
+                        company_name=company_name,
+                    )
+                    return clerk_id
+
+    except Exception as exc:
+        logger.error("Failed to create Clerk user for %s: %s", email, str(exc))
+
+    return None

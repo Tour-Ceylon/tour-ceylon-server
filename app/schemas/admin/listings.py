@@ -141,6 +141,24 @@ class AdminSafariDetail(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
+    @field_validator("safari_type", mode="before")
+    @classmethod
+    def normalize_safari_type(cls, value):
+        if isinstance(value, str):
+            val_lower = value.strip().lower().replace(" ", "_").replace("-", "_")
+            if val_lower in ("morning", "evening", "full_day", "private", "shared"):
+                return val_lower
+            if "full" in val_lower or "day" in val_lower:
+                return "full_day"
+            if "morning" in val_lower or "early" in val_lower:
+                return "morning"
+            if "afternoon" in val_lower or "evening" in val_lower or "night" in val_lower:
+                return "evening"
+            if "shared" in val_lower or "group" in val_lower or "seat" in val_lower:
+                return "shared"
+            return "private"
+        return value
+
     @field_validator(
         "included_items",
         "excluded_items",

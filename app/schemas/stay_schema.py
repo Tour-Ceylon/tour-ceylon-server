@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
@@ -18,6 +18,7 @@ class StayAmenityInput(BaseModel):
 
 
 class StayRoomTypeInput(BaseModel):
+    id: UUID | None = None
     name: str = Field(min_length=1, max_length=160)
     description: str | None = None
     count: int = Field(default=1, ge=1)
@@ -52,6 +53,7 @@ class StayPropertyCreate(BaseModel):
     application_note: str | None = Field(default=None, alias="applicationNote")
     contact: dict = Field(default_factory=dict)
     policies: dict = Field(default_factory=dict)
+    payment_policy: str = Field(default="pay_at_property", alias="paymentPolicy")
     media: list[dict] = Field(default_factory=list)
     amenities: list[StayAmenityInput] = Field(default_factory=list)
     room_types: list[StayRoomTypeInput] = Field(alias="roomTypes", min_length=1)
@@ -105,7 +107,7 @@ class StayRoomTypeResponse(BaseModel):
 
 class StayPropertyResponse(BaseModel):
     id: UUID
-    vendor_id: UUID = Field(alias="vendorId")
+    vendor_id: UUID | None = Field(default=None, alias="vendorId")
     listing_id: UUID | None = Field(default=None, alias="listingId")
     name: str
     property_type: str = Field(alias="propertyType")
@@ -119,6 +121,7 @@ class StayPropertyResponse(BaseModel):
     application_note: str | None = Field(default=None, alias="applicationNote")
     contact: dict
     policies: dict
+    payment_policy: str = Field(default="pay_at_property", alias="paymentPolicy")
     media: list[dict]
     metadata_json: dict = Field(validation_alias="metadata_json", serialization_alias="metadata")
     amenities: list[StayAmenityResponse] = Field(default_factory=list)
@@ -215,7 +218,7 @@ class StayRoomUnitUpdate(BaseModel):
 
 
 class StayRoomBlockCreate(BaseModel):
-    room_unit_id: UUID = Field(alias="roomUnitId")
+    room_unit_id: UUID | None = Field(default=None, alias="roomUnitId")
     start_date: date = Field(alias="startDate")
     end_date: date = Field(alias="endDate")
     block_type: StayRoomBlockType = Field(default=StayRoomBlockType.MANUAL, alias="blockType")
@@ -227,7 +230,7 @@ class StayRoomBlockCreate(BaseModel):
     @model_validator(mode="after")
     def validate_date_range(self):
         if self.end_date <= self.start_date:
-            raise ValueError("endDate must be after startDate")
+            self.end_date = self.start_date + timedelta(days=1)
         return self
 
 
