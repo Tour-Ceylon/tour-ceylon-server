@@ -342,57 +342,45 @@ class BookingInquiryService:
             if check_out is None or check_out <= check_in:
                 check_out = check_in + timedelta(days=1)
 
-            # Find room type and available room units
-            room_type = self.db.query(StayRoomType).filter(StayRoomType.property_id == prop.id).first()
-            if not room_type:
+            # Extract the specific rooms selected from the frontend multi-room payload
+            selected_rooms = item.get("selectedRooms") or item.get("selected_rooms") or []
+            rooms_to_book = []
+            
+            if selected_rooms:
+                for sr in selected_rooms:
+                    qty = int(sr.get("qty") or 1)
+                    r_id = sr.get("roomId")
+                    rt = None
+                    if r_id:
+                        try:
+                            rt = self.db.query(StayRoomType).filter(
+                                StayRoomType.property_id == prop.id,
+                                (StayRoomType.id == UUID(r_id)) | (StayRoomType.metadata_json['sourceVariantId'].astext == r_id)
+                            ).first()
+                        except ValueError:
+                            pass
+                    if not rt:
+                        r_name = sr.get("roomName")
+                        if r_name:
+                            rt = self.db.query(StayRoomType).filter(
+                                StayRoomType.property_id == prop.id,
+                                StayRoomType.name.ilike(f"%{r_name.strip()}%")
+                            ).first()
+                    if not rt:
+                        rt = self.db.query(StayRoomType).filter(StayRoomType.property_id == prop.id).first()
+                    if rt:
+                        rooms_to_book.append({"room_type": rt, "qty": qty})
+            else:
+                rt = self.db.query(StayRoomType).filter(StayRoomType.property_id == prop.id).first()
+                if rt:
+                    try:
+                        qty = int(item.get("travel_count") or item.get("travelCount") or 1)
+                    except (ValueError, TypeError):
+                        qty = 1
+                    rooms_to_book.append({"room_type": rt, "qty": qty})
+
+            if not rooms_to_book:
                 continue
-
-            requested_room_count = item.get("travel_count") or item.get("travelCount") or 1
-            try:
-                requested_room_count = int(requested_room_count)
-            except (ValueError, TypeError):
-                requested_room_count = 1
-
-            # --- Fix 2: Availability-aware room allocation (prevents double-booking) ---
-            inactive_statuses = {"maintenance", "blocked", "inactive", "out_of_service"}
-            all_units = self.db.query(StayRoomUnit).filter(
-                StayRoomUnit.property_id == prop.id,
-                StayRoomUnit.room_type_id == room_type.id
-            ).all()
-
-            if not all_units:
-                continue
-
-            available_units = []
-            for unit in all_units:
-                if unit.status.lower() in inactive_statuses:
-                    continue
-                has_booking = self.db.query(StayBookingRoom.id).join(
-                    StayBooking, StayBookingRoom.stay_booking_id == StayBooking.id
-                ).join(Booking, StayBooking.booking_id == Booking.id).filter(
-                    StayBookingRoom.room_unit_id == unit.id,
-                    StayBookingRoom.check_in_date < check_out,
-                    StayBookingRoom.check_out_date > check_in,
-                    StayBooking.status != StayBookingStatus.CANCELLED,
-                    Booking.status.in_(["pending", "confirmed", "completed"]),
-                ).first() is not None
-                if has_booking:
-                    continue
-                has_block = self.db.query(StayRoomBlock.id).filter(
-                    StayRoomBlock.room_unit_id == unit.id,
-                    StayRoomBlock.status == StayRoomBlockStatus.ACTIVE,
-                    StayRoomBlock.start_date < check_out,
-                    StayRoomBlock.end_date > check_in,
-                ).first() is not None
-                if has_block:
-                    continue
-                available_units.append(unit)
-
-            if not available_units:
-                logger.warning(f"No available room units for property {prop.name} on {check_in}-{check_out}")
-                continue
-
-            units_to_allocate = available_units[:requested_room_count]
 
             try:
                 parent_booking = Booking(
@@ -423,20 +411,64 @@ class BookingInquiryService:
                 self.db.flush()
 
                 total_item_price = Decimal(str(item.get("price") or 100))
-                per_unit_rate = total_item_price / Decimal(str(max(1, len(units_to_allocate))))
+                total_qty = sum(rb["qty"] for rb in rooms_to_book)
+                per_unit_rate = total_item_price / Decimal(str(max(1, total_qty)))
 
-                for unit in units_to_allocate:
-                    stay_booking_room = StayBookingRoom(
-                        stay_booking_id=stay_booking.id,
-                        room_unit_id=unit.id,
-                        room_type_id=room_type.id,
-                        check_in_date=check_in,
-                        check_out_date=check_out,
-                        nightly_rate=per_unit_rate,
-                        guests=2,
-                        metadata_json={}
-                    )
-                    self.db.add(stay_booking_room)
+                # Allocate units for each requested room type
+                inactive_statuses = {"maintenance", "blocked", "inactive", "out_of_service"}
+                units_to_allocate = []
+                for rb in rooms_to_book:
+                    room_type = rb["room_type"]
+                    requested_qty = rb["qty"]
+                    
+                    all_units = self.db.query(StayRoomUnit).filter(
+                        StayRoomUnit.property_id == prop.id,
+                        StayRoomUnit.room_type_id == room_type.id
+                    ).all()
+
+                    available_units = []
+                    for unit in all_units:
+                        if unit.status.lower() in inactive_statuses:
+                            continue
+                        has_booking = self.db.query(StayBookingRoom.id).join(
+                            StayBooking, StayBookingRoom.stay_booking_id == StayBooking.id
+                        ).join(Booking, StayBooking.booking_id == Booking.id).filter(
+                            StayBookingRoom.room_unit_id == unit.id,
+                            StayBookingRoom.check_in_date < check_out,
+                            StayBookingRoom.check_out_date > check_in,
+                            StayBooking.status != StayBookingStatus.CANCELLED,
+                            Booking.status.in_(["pending", "confirmed", "completed"]),
+                        ).first() is not None
+                        if has_booking:
+                            continue
+                        has_block = self.db.query(StayRoomBlock.id).filter(
+                            StayRoomBlock.room_unit_id == unit.id,
+                            StayRoomBlock.status == StayRoomBlockStatus.ACTIVE,
+                            StayRoomBlock.start_date < check_out,
+                            StayRoomBlock.end_date > check_in,
+                        ).first() is not None
+                        if has_block:
+                            continue
+                        available_units.append(unit)
+
+                    if not available_units:
+                        logger.warning(f"No available room units for {room_type.name} on {check_in}-{check_out}")
+                        continue
+
+                    units_to_allocate = available_units[:requested_qty]
+                    for unit in units_to_allocate:
+                        stay_booking_room = StayBookingRoom(
+                            stay_booking_id=stay_booking.id,
+                            room_unit_id=unit.id,
+                            room_type_id=room_type.id,
+                            check_in_date=check_in,
+                            check_out_date=check_out,
+                            nightly_rate=per_unit_rate,
+                            guests=1,
+                            metadata_json={}
+                        )
+                        self.db.add(stay_booking_room)
+                    self.db.flush()
 
                 self.db.flush()
                 self.db.commit()
@@ -445,7 +477,8 @@ class BookingInquiryService:
                 try:
                     from app.services.stay_inventory_service import StayInventoryService
                     inv_service = StayInventoryService(self.db)
-                    inv_service.refresh_calendar(prop.id, {room_type.id}, check_in, check_out - timedelta(days=1))
+                    room_type_ids = {rb["room_type"].id for rb in rooms_to_book}
+                    inv_service.refresh_calendar(prop.id, room_type_ids, check_in, check_out - timedelta(days=1))
                     self.db.commit()
                 except Exception as cal_ex:
                     logger.error(f"Error refreshing calendar for stay booking on {prop.name}: {cal_ex}")

@@ -35,6 +35,9 @@ class BookingItemBase(BaseModel):
     unit_price: float
     total_price: float
     travelers: list[BookingTravelerCreate] = []
+    selected_rooms: list[Any] | None = Field(None, alias="selectedRooms")
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
 
     @field_validator("travel_date", mode="before")
     @classmethod

@@ -138,6 +138,9 @@ class BookingService:
             .first()
         )
 
+        from app.services.stay_inventory_service import StayInventoryService
+        inv_service = StayInventoryService(self.db)
+
         # Build list of per-night dates sorted in ASCENDING order to prevent DB deadlocks
         night_dates = []
         curr = check_in
@@ -161,7 +164,7 @@ class BookingService:
                     .first()
                 )
                 if not calendar_row:
-                    total_units = len(room_type.room_units or []) or 5
+                    total_units = len(room_type.room_units or []) or 1
                     calendar_row = StayRoomTypeCalendar(
                         property_id=property_record.id,
                         room_type_id=room_type.id,
@@ -186,7 +189,7 @@ class BookingService:
         # 3. Determine Booking & Payment Statuses based on Payment Method
         if payload.payment_method == PaymentMethod.PAY_AT_PROPERTY:
             booking_status = BookingStatus.CONFIRMED
-            payment_status = PaymentTransactionStatus.NOT_REQUIRED
+            payment_status = PaymentTransactionStatus.PENDING
         else:  # BANK_TRANSFER
             booking_status = BookingStatus.PENDING
             payment_status = PaymentTransactionStatus.PENDING
@@ -237,6 +240,89 @@ class BookingService:
                 metadata_json={},
             )
             self.db.add(stay_booking)
+            self.db.flush()
+
+            # Allocate physical room units and create StayBookingRoom records
+            if property_record.room_types:
+                rooms_to_book = []
+                selected_rooms = first_item.selected_rooms or []
+                if selected_rooms:
+                    for sr in selected_rooms:
+                        qty = int(sr.get("qty") or 1)
+                        r_id = sr.get("roomId")
+                        rt = None
+                        if r_id:
+                            try:
+                                rt = self.db.query(StayRoomType).filter(
+                                    StayRoomType.property_id == property_record.id,
+                                    (StayRoomType.id == UUID(r_id)) | (StayRoomType.metadata_json['sourceVariantId'].astext == r_id)
+                                ).first()
+                            except ValueError:
+                                pass
+                        if not rt:
+                            r_name = sr.get("roomName")
+                            if r_name:
+                                rt = self.db.query(StayRoomType).filter(
+                                    StayRoomType.property_id == property_record.id,
+                                    StayRoomType.name.ilike(f"%{r_name.strip()}%")
+                                ).first()
+                        if not rt:
+                            rt = property_record.room_types[0]
+                        if rt:
+                            rooms_to_book.append({"room_type": rt, "qty": qty})
+                else:
+                    rt = None
+                    if first_item.variant_id:
+                        try:
+                            rt = self.db.query(StayRoomType).filter(
+                                StayRoomType.property_id == property_record.id,
+                                (StayRoomType.id == first_item.variant_id) | (StayRoomType.metadata_json['sourceVariantId'].astext == str(first_item.variant_id))
+                            ).first()
+                        except ValueError:
+                            pass
+                    if not rt:
+                        rt = property_record.room_types[0]
+                    rooms_to_book.append({"room_type": rt, "qty": first_item.quantity})
+
+                total_qty = sum(rb["qty"] for rb in rooms_to_book)
+                per_unit_rate = Decimal(str(first_item.unit_price)) / Decimal(str(max(1, total_qty))) if total_qty > 0 else Decimal(0)
+                if not first_item.unit_price:
+                    per_unit_rate = None
+
+                for rb in rooms_to_book:
+                    target_room_type = rb["room_type"]
+                    try:
+                        allocated_units = inv_service._allocate_room_units(
+                            property_id=property_record.id,
+                            room_type_id=target_room_type.id,
+                            requested_count=rb["qty"],
+                            check_in_date=check_in,
+                            check_out_date=check_out,
+                        )
+                        nightly_rate = per_unit_rate if per_unit_rate is not None else Decimal(str(target_room_type.base_price or 0))
+                        for unit in allocated_units:
+                            stay_booking_room = StayBookingRoom(
+                                stay_booking_id=stay_booking.id,
+                                room_unit_id=unit.id,
+                                room_type_id=target_room_type.id,
+                                check_in_date=check_in,
+                                check_out_date=check_out,
+                                nightly_rate=nightly_rate,
+                                guests=1,
+                                metadata_json={},
+                            )
+                            self.db.add(stay_booking_room)
+                        self.db.flush()
+                    except Exception as alloc_err:
+                        logger.warning(f"Could not auto-allocate physical room units for booking: {alloc_err}")
+
+            # Refresh room type calendar for the entire date range
+            try:
+                room_type_ids = {rt.id for rt in (property_record.room_types or [])}
+                if room_type_ids:
+                    inv_service.refresh_calendar(property_record.id, room_type_ids, check_in, check_out - timedelta(days=1))
+            except Exception as cal_err:
+                logger.warning(f"Could not refresh calendar after booking creation: {cal_err}")
 
         self.db.commit()
 

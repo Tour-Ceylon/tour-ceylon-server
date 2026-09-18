@@ -657,8 +657,9 @@ class StayInventoryService:
         for room_type_id, check_in_date, check_out_date in booking_rows:
             overlap_start = max(start_date, check_in_date)
             overlap_end = min(end_date + timedelta(days=1), check_out_date)
-            for night in self._night_dates(overlap_start, overlap_end):
-                booked_counts[(room_type_id, night)] += 1
+            if overlap_start < overlap_end:
+                for night in self._night_dates(overlap_start, overlap_end):
+                    booked_counts[(room_type_id, night)] += 1
 
         blocked_units_by_day: dict[tuple[UUID, date], set[UUID]] = defaultdict(set)
         block_rows = (

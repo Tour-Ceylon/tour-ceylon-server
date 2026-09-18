@@ -20,6 +20,7 @@ class CartItemSchema(BaseModel):
     travel_count: int = Field(ge=1, alias="travelCount")
     price: Decimal = Field(ge=0)
     base_currency: CurrencyCode = Field(default=CurrencyCode.USD, alias="baseCurrency")
+    selected_rooms: list[Any] | None = Field(None, alias="selectedRooms")
 
     @model_validator(mode="before")
     @classmethod

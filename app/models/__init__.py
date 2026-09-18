@@ -88,3 +88,5 @@ __all__ = [
     "User",
     "Wishlist",
 ]
+
+from app.models.listingBlock import ListingBlock
