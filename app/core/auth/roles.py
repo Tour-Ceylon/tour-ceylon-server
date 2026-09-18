@@ -98,7 +98,7 @@ def require_admin(
 
 def require_support_or_admin(
     claims: Dict[str, Any] = Depends(
-        require_any_role([UserRole.SUPPORT, UserRole.ADMIN])
+        require_any_role([UserRole.ADMIN])
     ),
 ) -> Dict[str, Any]:
     return claims

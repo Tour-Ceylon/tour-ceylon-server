@@ -1,18 +1,29 @@
-# Placeholder
-fastapi
-uvicorn
-sqlalchemy
-psycopg2-binary
-alembic
-pydantic
-email-validator
-python-dotenv
-supabase
-stripe
-httpx
-passlib[bcrypt]
-python-jose
-cloudinary
-python-multipart
-python-dotenv
-pydantic_settings
+# FastAPI and core dependencies
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+pydantic_settings==2.1.0
+
+# Database
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9
+alembic==1.13.1
+
+# Authentication and security
+passlib[bcrypt]==1.7.4
+python-jose==3.3.0
+
+# HTTP client and validation
+httpx==0.24.1
+email-validator==2.1.0
+
+# Environment and configuration
+python-dotenv==1.0.0
+
+# Third-party integrations
+supabase==2.3.4
+stripe==7.7.0
+cloudinary==1.36.0
+
+# File handling
+python-multipart==0.0.6

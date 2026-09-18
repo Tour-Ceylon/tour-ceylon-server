@@ -1,22 +1,108 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, EmailStr
+from pydantic import BaseModel, ConfigDict, Field, EmailStr, field_validator, model_validator
 
 from app.models.enum import CurrencyCode, InquiryStatus
 
 
 class CartItemSchema(BaseModel):
     """Cart item schema for booking inquiries"""
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
     
     listing_id: str = Field(..., alias="listingId")
     title: str
     travel_date: datetime = Field(..., alias="travelDate")
+    travel_date_end: datetime | None = Field(None, alias="travelDateEnd")
+    travel_date_raw: str | None = Field(None, alias="travelDateRaw")
     travel_count: int = Field(ge=1, alias="travelCount")
     price: Decimal = Field(ge=0)
     base_currency: CurrencyCode = Field(default=CurrencyCode.USD, alias="baseCurrency")
+    selected_rooms: list[Any] | None = Field(None, alias="selectedRooms")
+
+    @model_validator(mode="before")
+    @classmethod
+    def extract_travel_date_range(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            raw = (
+                data.get("travelDateRaw")
+                or data.get("travel_date_raw")
+                or data.get("travelDate")
+                or data.get("travel_date")
+            )
+            if isinstance(raw, str):
+                val = raw.strip()
+                if " to " in val:
+                    parts = val.split(" to ")
+                    start_str = parts[0].strip()
+                    end_str = parts[1].strip()
+                    data["travel_date_raw"] = val
+                    data["travelDateRaw"] = val
+                    data["travel_date"] = start_str
+                    data["travelDate"] = start_str
+                    if not data.get("travel_date_end") and not data.get("travelDateEnd"):
+                        data["travel_date_end"] = end_str
+                        data["travelDateEnd"] = end_str
+                else:
+                    if not data.get("travel_date_raw"):
+                        data["travel_date_raw"] = val
+            elif hasattr(raw, "isoformat"):
+                if not data.get("travel_date_raw"):
+                    data["travel_date_raw"] = raw.isoformat()
+
+            # Also check explicit checkOutDate / check_out_date if travel_date_end is missing
+            if not data.get("travel_date_end") and not data.get("travelDateEnd"):
+                co = data.get("checkOutDate") or data.get("check_out_date")
+                if co:
+                    data["travel_date_end"] = co
+                    data["travelDateEnd"] = co
+        return data
+
+    @field_validator("travel_date", mode="before")
+    @classmethod
+    def parse_travel_date(cls, value: Any) -> datetime:
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, date):
+            return datetime.combine(value, datetime.min.time())
+        if isinstance(value, str):
+            val = value.strip()
+            if " to " in val:
+                val = val.split(" to ")[0].strip()
+            try:
+                return datetime.fromisoformat(val.replace("Z", "+00:00"))
+            except ValueError:
+                pass
+            try:
+                return datetime.strptime(val[:10], "%Y-%m-%d")
+            except ValueError:
+                pass
+        return datetime.utcnow()
+
+    @field_validator("travel_date_end", mode="before")
+    @classmethod
+    def parse_travel_date_end(cls, value: Any) -> datetime | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, date):
+            return datetime.combine(value, datetime.min.time())
+        if isinstance(value, str):
+            val = value.strip()
+            if " to " in val:
+                val = val.split(" to ")[1].strip()
+            try:
+                return datetime.fromisoformat(val.replace("Z", "+00:00"))
+            except ValueError:
+                pass
+            try:
+                return datetime.strptime(val[:10], "%Y-%m-%d")
+            except ValueError:
+                pass
+        return None
 
 
 class BookingInquiryBase(BaseModel):

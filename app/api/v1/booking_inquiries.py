@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
 from fastapi.exceptions import RequestValidationError
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
@@ -69,6 +69,21 @@ async def create_booking_inquiry(
         # Log the incoming request for debugging
         body = await request.body()
         logger.info(f"Received booking inquiry request body: {body.decode('utf-8')}")
+        
+        # Preserve raw travel_date strings (e.g. "2026-09-16 to 2026-09-20") that
+        # the Pydantic validator strips down to a single datetime.  The auto-provisioning
+        # code for Stay bookings needs the full range to set correct check-out dates.
+        try:
+            import json as _json
+            raw_body = _json.loads(body)
+            raw_cart = raw_body.get("cartItems") or raw_body.get("cart_items") or []
+            for idx, cart_item_schema in enumerate(inquiry_data.cart_items):
+                if idx < len(raw_cart):
+                    raw_td = raw_cart[idx].get("travelDate") or raw_cart[idx].get("travel_date") or ""
+                    if isinstance(raw_td, str) and raw_td.strip():
+                        cart_item_schema.travel_date_raw = raw_td.strip()
+        except Exception as _ex:
+            logger.warning(f"Could not inject travel_date_raw: {_ex}")
         
         service = get_booking_inquiry_service(db)
         
@@ -245,16 +260,20 @@ def update_booking_inquiry(
         )
 
 
+class _StatusUpdateBody(BaseModel):
+    status: InquiryStatus
+
+
 @router.patch("/{inquiry_id}/status", response_model=BookingInquiryDetailed)
 def update_inquiry_status(
     inquiry_id: UUID,
-    status: InquiryStatus,
+    body: _StatusUpdateBody,
     db: Session = Depends(get_db)
 ):
     """Update booking inquiry status"""
     try:
         service = get_booking_inquiry_service(db)
-        inquiry = service.update_inquiry_status(inquiry_id, status)
+        inquiry = service.update_inquiry_status(inquiry_id, body.status)
         
         if not inquiry:
             raise HTTPException(

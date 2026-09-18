@@ -1,9 +1,22 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
-from pydantic import BaseModel, EmailStr, ConfigDict, Field, computed_field
+from pydantic import BaseModel, EmailStr, ConfigDict, Field, computed_field, field_validator
 
 from app.models.enum import UserRole
+
+
+def _parse_role(value: Any) -> Optional[UserRole]:
+    if value is None:
+        return None
+    if isinstance(value, UserRole):
+        return value
+    val_str = str(value).strip().upper()
+    if val_str in ("CUSTOMER", "CLIENT"):
+        return UserRole.TOURIST
+    if hasattr(UserRole, val_str):
+        return UserRole[val_str]
+    return UserRole.TOURIST
 
 
 class UserBase(BaseModel):
@@ -15,14 +28,20 @@ class UserBase(BaseModel):
     role: UserRole = UserRole.TOURIST
     is_active: bool = True
 
+    @field_validator("role", mode="before")
+    @classmethod
+    def validate_role(cls, v):
+        res = _parse_role(v)
+        return res if res is not None else UserRole.TOURIST
+
 
 class UserCreate(UserBase):
     """Schema for creating a new user"""
+    password: Optional[str] = None
     vendor_status: Optional[str] = None
     approved_categories: Optional[List[str]] = None
     company_name: Optional[str] = None
     business_profile: Optional[Dict[str, Any]] = None
-
 
 
 class UserUpdate(BaseModel):
@@ -37,6 +56,11 @@ class UserUpdate(BaseModel):
     approved_categories: Optional[List[str]] = None
     company_name: Optional[str] = None
     business_profile: Optional[Dict[str, Any]] = None
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def validate_role(cls, v):
+        return _parse_role(v)
 
 
 class UserResponse(UserBase):
@@ -109,6 +133,11 @@ class UserSearchParams(BaseModel):
     vendor_status: Optional[str] = None
     page: int = 1
     per_page: int = 20
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def validate_role(cls, v):
+        return _parse_role(v)
 
 
 class VendorApply(BaseModel):

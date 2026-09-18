@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models.bookingInquiry import BookingInquiry
 from app.models.enum import InquiryStatus
+from app.models.listing import Listing
 from app.schemas.booking_inquiry_schema import BookingInquiryCreate, BookingInquirySearchParams, BookingInquiryUpdate
 
 
@@ -37,7 +38,7 @@ class BookingInquiryRepository:
                 item_dict = item if isinstance(item, dict) else dict(item)
             
             # Convert datetime and Decimal objects for JSON compatibility
-            for key, value in item_dict.items():
+            for key, value in list(item_dict.items()):
                 if isinstance(value, datetime):
                     # Convert datetime to ISO format string
                     item_dict[key] = value.isoformat()
@@ -45,16 +46,28 @@ class BookingInquiryRepository:
                     # Convert Decimal to float for JSON serialization
                     item_dict[key] = float(value)
             
+            # If travel_date_raw is missing but we have travel_date and travel_date_end
+            if not item_dict.get('travel_date_raw'):
+                if item_dict.get('travel_date') and item_dict.get('travel_date_end'):
+                    start_str = str(item_dict['travel_date'])[:10]
+                    end_str = str(item_dict['travel_date_end'])[:10]
+                    item_dict['travel_date_raw'] = f"{start_str} to {end_str}"
+            
+            if item_dict.get('travel_date_raw') is None:
+                item_dict.pop('travel_date_raw', None)
+            if item_dict.get('travel_date_end') is None:
+                item_dict.pop('travel_date_end', None)
+            
             serialized_items.append(item_dict)
         
         return serialized_items
 
-    def generate_inquiry_reference(self) -> str:
-        """Generate unique inquiry reference in format INQ-XXXXXXXX"""
+    def generate_inquiry_reference(self, prefix: str = "INQ") -> str:
+        """Generate unique inquiry reference in format PREFIX-XXXXXXXX"""
         while True:
             # Generate 8 random alphanumeric characters
             suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
-            reference = f"INQ-{suffix}"
+            reference = f"{prefix}-{suffix}"
             
             # Check if reference already exists
             existing = self._base_query().filter(BookingInquiry.reference == reference).first()
@@ -68,8 +81,55 @@ class BookingInquiryRepository:
         # Properly serialize cart_items with datetime handling for JSON storage
         inquiry_dict['cart_items'] = self._serialize_cart_items(inquiry_dict['cart_items'])
         
+        # Ensure travel_date_raw and travel_date_end are explicitly preserved in serialized items
+        try:
+            raw_items = inquiry_data.cart_items
+            for idx, serialized in enumerate(inquiry_dict['cart_items']):
+                if idx < len(raw_items):
+                    raw_item = raw_items[idx]
+                    if hasattr(raw_item, 'travel_date_raw') and raw_item.travel_date_raw:
+                        serialized['travel_date_raw'] = raw_item.travel_date_raw
+                    if hasattr(raw_item, 'travel_date_end') and raw_item.travel_date_end:
+                        val = raw_item.travel_date_end
+                        serialized['travel_date_end'] = val.isoformat() if hasattr(val, 'isoformat') else str(val)
+        except Exception:
+            pass
+            
+        # Determine prefix based on cart items
+        prefix = "INQ"
+        if inquiry_data.cart_items and len(inquiry_data.cart_items) > 0:
+            listing_types = set()
+            for item in inquiry_data.cart_items:
+                listing_id = getattr(item, 'listing_id', None)
+                if listing_id:
+                    try:
+                        listing = self.db.query(Listing).filter(Listing.id == listing_id).first()
+                        if listing and hasattr(listing.listing_type, 'value'):
+                            listing_types.add(listing.listing_type.value)
+                        elif listing and hasattr(listing, 'listing_type'):
+                            listing_types.add(str(listing.listing_type))
+                    except Exception:
+                        pass
+            
+            if len(listing_types) > 1:
+                prefix = "MIX"
+            elif len(listing_types) == 1:
+                ltype = list(listing_types)[0].upper()
+                if "HOTEL" in ltype or "STAY" in ltype:
+                    prefix = "STY"
+                elif "SAFARI" in ltype:
+                    prefix = "SAF"
+                elif "EXPERIENCE" in ltype:
+                    prefix = "EXP"
+                elif "TOUR" in ltype:
+                    prefix = "TUR"
+                elif "TRANSFER" in ltype:
+                    prefix = "TRN"
+                elif "PACKAGE" in ltype:
+                    prefix = "PKG"
+        
         # Generate unique reference
-        inquiry_dict['reference'] = self.generate_inquiry_reference()
+        inquiry_dict['reference'] = self.generate_inquiry_reference(prefix=prefix)
         
         # Set default status
         inquiry_dict['status'] = InquiryStatus.PENDING_CONTACT
