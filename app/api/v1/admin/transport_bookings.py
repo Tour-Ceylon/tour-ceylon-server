@@ -2,13 +2,15 @@ import math
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_user
 from app.api.v1.admin.drivers import require_driver_admin
 from app.config.database import get_db
+from app.core.logging import logger
+from app.integrations.email_provider import email_provider
 from app.models.driver import Driver
 from app.models.enum import AssignmentStatus, DriverStatus
 from app.models.transportBooking import TransportBooking
@@ -21,6 +23,30 @@ from app.schemas.admin.transport_booking_schema import (
 )
 
 router = APIRouter(prefix="/transport-bookings", tags=["admin-transport-bookings"])
+
+
+def _send_driver_assignment_notification_task(booking: TransportBooking, driver: Driver):
+    """Background task to send trip assignment email to assigned driver"""
+    try:
+        success = email_provider.send_transport_driver_assignment_notification(booking, driver)
+        if success:
+            logger.info("Driver assignment email dispatched successfully for %s", booking.booking_reference)
+        else:
+            logger.warning("Driver assignment email returned false for %s", booking.booking_reference)
+    except Exception as e:
+        logger.error("Error dispatching driver assignment email for %s: %s", booking.booking_reference, str(e))
+
+
+def _send_customer_driver_assigned_task(booking: TransportBooking, driver: Driver):
+    """Background task to send driver assigned email to customer"""
+    try:
+        success = email_provider.send_transport_driver_assigned_customer_email(booking, driver)
+        if success:
+            logger.info("Customer driver assigned email dispatched successfully for %s", booking.booking_reference)
+        else:
+            logger.warning("Customer driver assigned email returned false for %s", booking.booking_reference)
+    except Exception as e:
+        logger.error("Error dispatching customer driver assigned email for %s: %s", booking.booking_reference, str(e))
 
 
 def _to_booking_response(booking: TransportBooking) -> AdminTransportBookingDetailResponse:
@@ -193,6 +219,7 @@ def get_admin_transport_booking(
 def assign_driver_to_booking(
     booking_id: UUID,
     payload: AdminAssignDriverRequest,
+    background_tasks: BackgroundTasks,
     _: User = Depends(require_driver_admin),
     db: Session = Depends(get_db),
 ):
@@ -233,5 +260,14 @@ def assign_driver_to_booking(
 
     db.commit()
     db.refresh(booking)
+
+    # Dispatch custom email notifications to Driver and Customer in background
+    background_tasks.add_task(_send_driver_assignment_notification_task, booking, driver)
+    background_tasks.add_task(_send_customer_driver_assigned_task, booking, driver)
+    logger.info(
+        "Queued driver assignment emails for booking %s (Driver ID: %s)",
+        booking.booking_reference,
+        driver.id,
+    )
 
     return _to_booking_response(booking)
