@@ -614,7 +614,9 @@ class StayRepository:
         }
 
         room_types = list(property_record.room_types or [])
+        is_fallback = False
         if not room_types:
+            is_fallback = True
             room_types = [
                 StayRoomType(
                     name="Standard Room",
@@ -623,6 +625,14 @@ class StayRepository:
                     currency=CurrencyCode.LKR.value,
                 )
             ]
+
+        # When real room types exist, prune any obsolete variants (like previous dummy fallback Standard Room)
+        if not is_fallback:
+            valid_room_names = {(rt.name or "").strip().lower() for rt in room_types if rt.name}
+            for existing_variant in list(listing.variants or []):
+                if existing_variant.name.strip().lower() not in valid_room_names:
+                    self.db.delete(existing_variant)
+            self.db.flush()
 
         for index, room_type in enumerate(room_types):
             amount = float(room_type.base_price or 0)
@@ -636,6 +646,7 @@ class StayRepository:
                 existing.capacity_max = capacity_max
                 existing.is_default = (index == 0)
                 existing.booking_unit = BookingUnit.PER_ROOM
+                existing.is_active = not is_fallback
                 variant = existing
             else:
                 variant = ListingVariant(
@@ -645,6 +656,7 @@ class StayRepository:
                     capacity_min=1,
                     capacity_max=capacity_max,
                     is_default=(index == 0),
+                    is_active=not is_fallback,
                 )
                 self.db.add(variant)
                 self.db.flush()

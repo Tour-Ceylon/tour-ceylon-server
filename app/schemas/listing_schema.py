@@ -588,6 +588,32 @@ class ListingResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    @field_validator("variants", mode="before")
+    @classmethod
+    def filter_frontend_variants(cls, raw_variants):
+        if not raw_variants:
+            return []
+        filtered = []
+        for v in list(raw_variants or []):
+            is_active = getattr(v, "is_active", True) if not isinstance(v, dict) else v.get("is_active", True)
+            if is_active is False:
+                continue
+
+            name = (getattr(v, "name", "") if not isinstance(v, dict) else v.get("name", "")).strip().lower()
+            pricing = getattr(v, "pricing", None) if not isinstance(v, dict) else v.get("pricing")
+            amount = 0
+            if isinstance(pricing, dict):
+                amount = pricing.get("amount", 0)
+            elif pricing is not None:
+                amount = getattr(pricing, "amount", 0)
+
+            # Never return dummy/fallback 'Standard Room' variants with price <= 0 to frontends
+            if name == "standard room" and (amount is None or float(amount) <= 0):
+                continue
+
+            filtered.append(v)
+        return filtered
+
     model_config = ConfigDict(from_attributes=True)
 
 
