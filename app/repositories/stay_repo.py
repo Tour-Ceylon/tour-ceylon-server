@@ -5,6 +5,7 @@ from uuid import UUID
 
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.integrations.cloudinary import upload_image
 from app.models.destination import Destination
@@ -31,7 +32,7 @@ from app.models.stay import (
     StayRoomType,
     StayRoomUnit,
 )
-from app.schemas.stay_schema import StayPropertyCreate
+from app.schemas.stay_schema import StayPropertyCreate, StayPropertyUpdate
 
 
 class StayRepository:
@@ -128,6 +129,107 @@ class StayRepository:
 
     def update_for_vendor(self, vendor_id: UUID, property_id: UUID, payload: StayPropertyCreate) -> StayProperty | None:
         return self.update_property(property_id, payload, user_id=vendor_id, is_admin=False)
+
+    def patch_property(
+        self, property_id: UUID, payload: StayPropertyUpdate, user_id: UUID, is_admin: bool = False
+    ) -> StayProperty | None:
+        if is_admin:
+            db_property = self.get_by_id(property_id)
+            if db_property is None:
+                from app.models.listing import Listing
+                listing = self.db.query(Listing).filter(Listing.id == property_id).first()
+                if listing:
+                    db_property = self.create_from_listing(listing.vendor_id, property_id)
+        else:
+            db_property = self.get_for_vendor(user_id, property_id)
+            if db_property is None:
+                db_property = self.create_from_listing(user_id, property_id)
+
+        if db_property is None:
+            return None
+
+        try:
+            data = payload.model_dump(exclude_unset=True, by_alias=False)
+            target_vendor_id = db_property.vendor_id
+
+            previous_status = str(db_property.status or "").lower()
+            incoming_status = str(data.get("status") or "").lower()
+
+            if "status" in data:
+                if previous_status in {"approved", "published"} and incoming_status != "draft" and not is_admin:
+                    data["status"] = previous_status
+                elif is_admin and incoming_status in {"submitted", "approved", "published"}:
+                    data["status"] = "approved"
+
+            direct_fields = [
+                "name",
+                "property_type",
+                "description",
+                "address",
+                "city",
+                "district",
+                "latitude",
+                "longitude",
+                "status",
+                "application_note",
+                "payment_policy",
+            ]
+            for field in direct_fields:
+                if field in data and data[field] is not None:
+                    setattr(db_property, field, data[field])
+
+            if "contact" in data and data["contact"] is not None:
+                merged_contact = dict(db_property.contact or {})
+                merged_contact.update(data["contact"])
+                db_property.contact = merged_contact
+                flag_modified(db_property, "contact")
+
+            if "policies" in data and data["policies"] is not None:
+                merged_policies = dict(db_property.policies or {})
+                merged_policies.update(data["policies"])
+                db_property.policies = merged_policies
+                flag_modified(db_property, "policies")
+
+            if "metadata" in data and data["metadata"] is not None:
+                merged_metadata = dict(db_property.metadata_json or {})
+                merged_metadata.update(data["metadata"])
+                db_property.metadata_json = merged_metadata
+                flag_modified(db_property, "metadata_json")
+
+            if "media" in data and data["media"] is not None:
+                db_property.media = self._normalize_media_payload(
+                    data["media"],
+                    vendor_id=target_vendor_id,
+                )
+                flag_modified(db_property, "media")
+
+            if "amenities" in data and data["amenities"] is not None:
+                for amenity_map in list(db_property.amenities or []):
+                    self.db.delete(amenity_map)
+                self.db.flush()
+
+                for amenity_data in data["amenities"]:
+                    amenity = self._get_or_create_amenity(amenity_data)
+                    self.db.add(
+                        StayPropertyAmenityMap(
+                            property_id=db_property.id,
+                            amenity_id=amenity.id,
+                            value=self._wrap_amenity_value(amenity_data.get("value")),
+                        )
+                    )
+
+            if "room_types" in data and data["room_types"] is not None:
+                self._replace_children(db_property, {"room_types": data["room_types"]})
+
+            self._ensure_listing_projection(db_property)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+        return self.get_by_id(db_property.id)
+
+    def patch_for_vendor(self, vendor_id: UUID, property_id: UUID, payload: StayPropertyUpdate) -> StayProperty | None:
+        return self.patch_property(property_id, payload, user_id=vendor_id, is_admin=False)
 
     def list_for_vendor(self, vendor_id: UUID) -> list[StayProperty]:
         properties = (

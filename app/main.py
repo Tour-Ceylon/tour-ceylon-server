@@ -1,7 +1,11 @@
 import logging
+import os
+import time
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
 from app.api.router import api_router
 from app.api.errors import AdminAPIError, admin_api_error_handler
 
@@ -18,16 +22,21 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 
+request_logger = logging.getLogger("app.request")
+
 app = FastAPI(title="Travel Ready Tours")
 app.add_exception_handler(AdminAPIError, admin_api_error_handler)
 
 
-from fastapi.responses import JSONResponse
-from fastapi import Request
-
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logging.error("Unhandled server exception on %s %s: %s", request.method, request.url.path, str(exc), exc_info=True)
+    logging.error(
+        "Unhandled server exception on %s %s: %s",
+        request.method,
+        request.url.path,
+        str(exc),
+        exc_info=True,
+    )
     origin = request.headers.get("origin", "*")
     return JSONResponse(
         status_code=500,
@@ -40,12 +49,12 @@ async def global_exception_handler(request: Request, exc: Exception):
         },
     )
 
+
 # Add CORS middleware
-import os
 allowed_origins = [
     # Local development
     "http://localhost:3000",
-    "http://localhost:3001", 
+    "http://localhost:3001",
     "http://localhost:5173",
     "http://127.0.0.1:3000",
     "http://127.0.0.1:3001",
@@ -69,5 +78,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Request timing middleware (added after CORS so it wraps it and measures total time)
+@app.middleware("http")
+async def log_request_time(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    ms = (time.perf_counter() - start) * 1000
+    request_logger.info(
+        "%s %s %d %.2f ms",
+        request.method,
+        request.url.path,
+        response.status_code,
+        ms,
+    )
+    return response
+
 
 app.include_router(api_router, prefix="/api/v1")

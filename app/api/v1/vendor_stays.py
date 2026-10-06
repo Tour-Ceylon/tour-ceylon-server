@@ -18,6 +18,7 @@ from app.schemas.stay_schema import (
     StayInventoryResponse,
     StayRoomBlockListResponse,
     StayPropertyCreate,
+    StayPropertyUpdate,
     StayPropertyListResponse,
     StayPropertyResponse,
     StayRoomBlockCreate,
@@ -76,6 +77,32 @@ def ensure_property_access(current_user: User, repo: StayRepository, property_id
         else:
             property_record = repo.create_from_listing(current_user.id, property_id)
             
+    if property_record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stay property not found")
+    return property_record
+
+
+@router.patch("/{property_id}", response_model=StayPropertyResponse, response_model_by_alias=True)
+async def patch_stay_property(
+    property_id: UUID,
+    payload: StayPropertyUpdate,
+    current_user: User = Depends(require_stay_vendor),
+    repo: StayRepository = Depends(get_stay_repository),
+):
+    try:
+        property_record = repo.patch_property(
+            property_id, payload, user_id=current_user.id, is_admin=is_admin_user(current_user)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except CloudinaryIntegrationError as exc:
+        repo.db.rollback()
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to upload stay images") from exc
+    except SQLAlchemyError as exc:
+        repo.db.rollback()
+        logger.exception("Failed to patch stay listing property_id=%s", property_id)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to patch stay listing") from exc
+
     if property_record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stay property not found")
     return property_record
