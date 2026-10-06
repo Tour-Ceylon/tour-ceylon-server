@@ -238,12 +238,16 @@ class StayRepository:
             .order_by(StayProperty.created_at.desc())
             .all()
         )
-        self._ensure_listing_projection_for_many(properties)
+        missing = [p for p in properties if p.listing_id is None]
+        if missing:
+            self._ensure_listing_projection_for_many(missing)
         return properties
 
     def list_all(self) -> list[StayProperty]:
         properties = self._base_query().order_by(StayProperty.created_at.desc()).all()
-        self._ensure_listing_projection_for_many(properties)
+        missing = [p for p in properties if p.listing_id is None]
+        if missing:
+            self._ensure_listing_projection_for_many(missing)
         return properties
 
     def get_for_vendor(self, vendor_id: UUID, property_id: UUID) -> StayProperty | None:
@@ -255,7 +259,7 @@ class StayRepository:
             )
             .first()
         )
-        if property_record is not None:
+        if property_record is not None and property_record.listing_id is None:
             self._ensure_listing_projection(property_record)
             self.db.commit()
         return property_record
@@ -271,7 +275,7 @@ class StayRepository:
             listing = self.db.query(Listing).filter(Listing.id == property_id).first()
             if listing:
                 property_record = self.create_from_listing(listing.vendor_id, property_id)
-        if property_record is not None:
+        if property_record is not None and property_record.listing_id is None:
             self._ensure_listing_projection(property_record)
             self.db.commit()
         return property_record

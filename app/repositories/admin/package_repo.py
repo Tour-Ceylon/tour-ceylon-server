@@ -41,7 +41,11 @@ class AdminPackageRepository:
     def get_all(self) -> list[Package]:
         return (
             self.db.query(Package)
-            .options(joinedload(Package.cover_media), selectinload(Package.media_assets))
+            .options(
+                joinedload(Package.cover_media),
+                selectinload(Package.media_assets),
+                selectinload(Package.add_ons).joinedload(PackageAddOn.add_on),
+            )
             .order_by(Package.created_at.desc())
             .all()
         )
@@ -49,7 +53,11 @@ class AdminPackageRepository:
     def get_all_active(self) -> list[Package]:
         return (
             self.db.query(Package)
-            .options(joinedload(Package.cover_media), selectinload(Package.media_assets))
+            .options(
+                joinedload(Package.cover_media),
+                selectinload(Package.media_assets),
+                selectinload(Package.add_ons).joinedload(PackageAddOn.add_on),
+            )
             .filter(Package.is_active.is_(True))
             .order_by(Package.created_at.desc())
             .all()
@@ -58,7 +66,11 @@ class AdminPackageRepository:
     def get(self, package_id: UUID) -> Package | None:
         return (
             self.db.query(Package)
-            .options(joinedload(Package.cover_media), selectinload(Package.media_assets))
+            .options(
+                joinedload(Package.cover_media),
+                selectinload(Package.media_assets),
+                selectinload(Package.add_ons).joinedload(PackageAddOn.add_on),
+            )
             .filter(Package.id == package_id)
             .first()
         )
@@ -66,7 +78,11 @@ class AdminPackageRepository:
     def get_active(self, package_id: UUID) -> Package | None:
         return (
             self.db.query(Package)
-            .options(joinedload(Package.cover_media), selectinload(Package.media_assets))
+            .options(
+                joinedload(Package.cover_media),
+                selectinload(Package.media_assets),
+                selectinload(Package.add_ons).joinedload(PackageAddOn.add_on),
+            )
             .filter(Package.id == package_id, Package.is_active.is_(True))
             .first()
         )

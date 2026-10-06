@@ -54,7 +54,7 @@ async def create_listing(
 
 
 @router.get("/", response_model=ListingListResponse)
-async def get_listings(
+def get_listings(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     is_active: bool | None = Query(None),
@@ -82,7 +82,7 @@ async def get_listings(
 
 
 @router.get("/id/{listing_id}", response_model=ListingResponse)
-async def get_listing(
+def get_listing(
     listing_id: UUID,
     listing_repo: ListingRepository = Depends(get_listing_repository),
 ):
@@ -98,7 +98,7 @@ async def get_listing(
 
 
 @router.get("/search", response_model=ListingListResponse)
-async def search_listings_get(
+def search_listings_get(
     listing_type: ListingType | None = Query(None),
     destination_id: UUID | None = Query(None),
     location: str | None = Query(None),

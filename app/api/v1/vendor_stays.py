@@ -128,7 +128,7 @@ async def create_stay_property(
 
 
 @router.get("/", response_model=StayPropertyListResponse, response_model_by_alias=True)
-async def list_stay_properties(
+def list_stay_properties(
     current_user: User = Depends(require_stay_vendor),
     repo: StayRepository = Depends(get_stay_repository),
 ):
@@ -137,7 +137,7 @@ async def list_stay_properties(
 
 
 @router.get("/{property_id}", response_model=StayPropertyResponse, response_model_by_alias=True)
-async def get_stay_property(
+def get_stay_property(
     property_id: UUID,
     current_user: User = Depends(require_stay_vendor),
     repo: StayRepository = Depends(get_stay_repository),
