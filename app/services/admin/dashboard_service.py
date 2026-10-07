@@ -11,12 +11,9 @@ from app.models.destination import Destination
 from app.models.enum import BookingUnit, CurrencyCode, ListingStatus, ListingType, UserRole
 from app.models.listing import Listing
 from app.models.stay import StayProperty
-from app.repositories.admin.addon_repo import AdminAddonRepository
 from app.repositories.admin.destination_repo import AdminDestinationRepository
 from app.repositories.admin.listing_repo import AdminDashboardListingRepository
-from app.repositories.admin.package_repo import AdminPackageRepository
 from app.repositories.admin.settings_repo import AdminSettingsRepository
-from app.services.package_service import build_package_response
 
 
 class AdminDashboardService:
@@ -33,9 +30,7 @@ class AdminDashboardService:
 
     def __init__(self, db: Session):
         self.db = db
-        self.addons = AdminAddonRepository(db)
         self.destinations = AdminDestinationRepository(db)
-        self.packages = AdminPackageRepository(db)
         self.settings = AdminSettingsRepository(db)
         self.listings = AdminDashboardListingRepository(db)
 
@@ -48,8 +43,6 @@ class AdminDashboardService:
                 listing_groups[category].append(self._build_listing_response(listing))
 
         snapshot = {
-            "packages": [self._build_package_response(package) for package in self.packages.get_all()],
-            "addOns": [self._build_addon_response(addon) for addon in self.addons.get_all()],
             "settings": self.get_settings(),
             "listings": listing_groups,
         }
@@ -61,6 +54,7 @@ class AdminDashboardService:
             (perf_time.perf_counter() - started_at) * 1000,
         )
         return snapshot
+
 
     def get_listings(self, category: str, current_user) -> list[dict]:
         started_at = perf_time.perf_counter()
@@ -155,9 +149,12 @@ class AdminDashboardService:
         if not self.addons.delete(addon_id):
             raise self._not_found("Add-on not found")
 
-    def create_listing(self, category: str, payload: dict) -> dict:
+    def create_listing(self, category: str, payload: dict, current_user=None) -> dict:
         category = self._validate_category(category)
-        listing = self.listings.create_listing(self._listing_model_data(category, payload))
+        model_data = self._listing_model_data(category, payload)
+        if current_user and getattr(current_user.role, 'value', current_user.role) == UserRole.VENDOR.value:
+            model_data['vendor_id'] = current_user.id
+        listing = self.listings.create_listing(model_data)
         return self._build_listing_response(listing)
 
     def update_listing(self, category: str, listing_id: UUID, payload: dict) -> dict:
@@ -241,8 +238,6 @@ class AdminDashboardService:
 
     def reset(self) -> dict:
         self.listings.delete_all()
-        self.packages.delete_all()
-        self.addons.delete_all()
         return self.get_snapshot()
 
     def _validate_destination_id(self, destination_id: UUID) -> None:
@@ -495,20 +490,6 @@ class AdminDashboardService:
             "transfer": "transfer_detail",
         }[category]
 
-    def _build_package_response(self, package) -> dict:
-        return build_package_response(package)
-
-    def _build_addon_response(self, addon) -> dict:
-        category = getattr(addon.category, "value", addon.category)
-        if isinstance(category, str):
-            category = category.lower().replace("_", "-")
-        return {
-            "id": addon.id,
-            "name": addon.name,
-            "description": addon.description,
-            "price": addon.price,
-            "category": category,
-        }
 
     def _build_listing_response(self, listing: Listing) -> dict:
         payload = {

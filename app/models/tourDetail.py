@@ -17,6 +17,9 @@ class TourDetail(Base, UUIDMixin, TimestampMixin):
     meeting_point = Column(String, nullable=False)
 
     itinerary_highlights = Column(JSON, nullable=True)
+    itinerary = Column(JSON, nullable=True)
+    category_id = Column(String, nullable=True)
+    additional_categories = Column(JSON, nullable=True)
     included_items = Column(JSON, nullable=True)
     excluded_items = Column(JSON, nullable=True)
     languages = Column(JSON, nullable=True)

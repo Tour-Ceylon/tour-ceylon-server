@@ -3,7 +3,6 @@ from fastapi import APIRouter
 from app.api.v1 import (
     admin,
     auth,
-    packages,
     users,
     listing,
     bookings,
@@ -37,11 +36,7 @@ api_router.include_router(
     tags=["auth"]
 )
 
-api_router.include_router(
-    packages.router,
-    prefix="/packages",
-    tags=["packages"]
-)
+
 
 # Include user routes
 api_router.include_router(

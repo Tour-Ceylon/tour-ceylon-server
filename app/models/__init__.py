@@ -1,6 +1,6 @@
 from app.models.activityDetail import ActivityDetail
 from app.models.availabilityCalendar import AvailabilityCalendar
-from app.models.admin_dashboard import AddOn, AdminSettings, Package, PackageAddOn
+from app.models.admin_dashboard import AdminSettings
 from app.models.booking import Booking, Bookings
 from app.models.bookingInquiry import BookingInquiry, BookingInquiries
 from app.models.bookingItem import BookingItem

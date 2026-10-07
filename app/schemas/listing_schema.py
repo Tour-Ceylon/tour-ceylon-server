@@ -119,7 +119,10 @@ class TourDetailBase(BaseModel):
     duration_days: int
     route_summary: str
     meeting_point: str
+    category_id: str | None = None
+    additional_categories: list[str] = Field(default_factory=list)
     itinerary_highlights: list[str] = Field(default_factory=list)
+    itinerary: list[dict] = Field(default_factory=list)
     included_items: list[str] = Field(default_factory=list)
     excluded_items: list[str] = Field(default_factory=list)
     languages: list[str] = Field(default_factory=list)
@@ -140,6 +143,8 @@ class TourDetailBase(BaseModel):
 
     @field_validator(
         "itinerary_highlights",
+        "itinerary",
+        "additional_categories",
         "included_items",
         "excluded_items",
         "languages",
@@ -157,7 +162,10 @@ class TourDetailUpdate(BaseModel):
     duration_days: int | None = None
     route_summary: str | None = None
     meeting_point: str | None = None
+    category_id: str | None = None
+    additional_categories: list[str] | None = None
     itinerary_highlights: list[str] | None = None
+    itinerary: list[dict] | None = None
     included_items: list[str] | None = None
     excluded_items: list[str] | None = None
     languages: list[str] | None = None
@@ -438,6 +446,7 @@ class ListingVariantResponse(BaseModel):
 
 
 class ListingBase(CoordinateMixin):
+    vendor_id: UUID | None = None
     listing_type: ListingType
     destination_id: UUID
     title: str

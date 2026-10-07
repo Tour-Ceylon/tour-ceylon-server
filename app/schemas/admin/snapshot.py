@@ -1,6 +1,5 @@
 from pydantic import BaseModel
 
-from app.schemas.admin.addons import AddOnResponse
 from app.schemas.admin.listings import (
     ExperienceListingResponse,
     SafariListingResponse,
@@ -8,7 +7,6 @@ from app.schemas.admin.listings import (
     TourListingResponse,
     TransferListingResponse,
 )
-from app.schemas.admin.packages import PackageResponse
 from app.schemas.admin.settings import AdminSettingsResponse
 
 
@@ -21,8 +19,6 @@ class SnapshotListingsResponse(BaseModel):
 
 
 class AdminSnapshotResponse(BaseModel):
-    packages: list[PackageResponse]
-    addOns: list[AddOnResponse]
     settings: AdminSettingsResponse
     listings: SnapshotListingsResponse
 

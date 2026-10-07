@@ -68,8 +68,9 @@ def _ensure_category_matches_listing(service: MediaService, category: str, listi
 async def create_stay_listing(
     payload: StayListingCreate,
     service: AdminDashboardService = Depends(get_admin_service),
+    current_user: User = Depends(get_current_user),
 ):
-    return service.create_listing("stay", payload.model_dump(by_alias=False))
+    return service.create_listing("stay", payload.model_dump(by_alias=False), current_user)
 
 
 @router.post(
@@ -87,8 +88,9 @@ async def create_stay_listing(
 async def create_tour_listing(
     payload: TourListingCreate,
     service: AdminDashboardService = Depends(get_admin_service),
+    current_user: User = Depends(get_current_user),
 ):
-    return service.create_listing("tour", payload.model_dump(by_alias=False))
+    return service.create_listing("tour", payload.model_dump(by_alias=False), current_user)
 
 
 @router.post(
@@ -106,8 +108,9 @@ async def create_tour_listing(
 async def create_safari_listing(
     payload: SafariListingCreate,
     service: AdminDashboardService = Depends(get_admin_service),
+    current_user: User = Depends(get_current_user),
 ):
-    return service.create_listing("safari", payload.model_dump(by_alias=False))
+    return service.create_listing("safari", payload.model_dump(by_alias=False), current_user)
 
 
 @router.post(
@@ -125,8 +128,9 @@ async def create_safari_listing(
 async def create_experience_listing(
     payload: ExperienceListingCreate,
     service: AdminDashboardService = Depends(get_admin_service),
+    current_user: User = Depends(get_current_user),
 ):
-    return service.create_listing("experience", payload.model_dump(by_alias=False))
+    return service.create_listing("experience", payload.model_dump(by_alias=False), current_user)
 
 
 @router.post(
@@ -144,8 +148,9 @@ async def create_experience_listing(
 async def create_transfer_listing(
     payload: TransferListingCreate,
     service: AdminDashboardService = Depends(get_admin_service),
+    current_user: User = Depends(get_current_user),
 ):
-    return service.create_listing("transfer", payload.model_dump(by_alias=False))
+    return service.create_listing("transfer", payload.model_dump(by_alias=False), current_user)
 
 
 @router.get(
@@ -274,7 +279,7 @@ async def update_listing_status(
     return service.update_listing_status(category, listing_id, payload.status)
 
 
-@router.patch(
+@router.put(
     "/{category}/{listing_id}",
     response_model=AdminListingResponse,
     response_model_by_alias=True,
