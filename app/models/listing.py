@@ -127,7 +127,7 @@ class Listing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
 
     @property
     def priced_variants(self) -> list:
-        variants = list(self.variants or [])
+        variants = [v for v in list(self.variants or []) if getattr(v, "is_active", True) is not False]
         return [
             variant
             for variant in sorted(
@@ -143,7 +143,7 @@ class Listing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
 
     @property
     def default_variant(self):
-        variants = list(self.variants or [])
+        variants = [v for v in list(self.variants or []) if getattr(v, "is_active", True) is not False]
         default = next((variant for variant in variants if variant.is_default), None)
         if default and default.pricing is not None:
             return default
@@ -153,7 +153,14 @@ class Listing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     @property
     def from_price(self) -> dict | None:
         priced_variants = [
-            variant for variant in list(self.variants or []) if variant.pricing is not None and (variant.pricing.get("amount") or 0) > 0
+            variant for variant in list(self.variants or [])
+            if getattr(variant, "is_active", True) is not False
+            and variant.pricing is not None
+            and (variant.pricing.get("amount") or 0) > 0
+            and not (
+                (variant.name or "").strip().lower() == "standard room"
+                and (variant.pricing.get("amount") or 0) <= 0
+            )
         ]
         if priced_variants:
             cheapest_variant = min(

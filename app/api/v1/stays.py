@@ -20,7 +20,7 @@ def get_stay_inventory_service(db: Session = Depends(get_db)) -> StayInventorySe
 
 
 @router.get("/public/listing/{listing_id}", response_model=StayPropertyResponse, response_model_by_alias=True)
-async def get_stay_by_listing(
+def get_stay_by_listing(
     listing_id: str,
     db: Session = Depends(get_db),
 ):
@@ -41,7 +41,7 @@ async def get_stay_by_listing(
 
 
 @router.post("/availability", response_model=StayAvailabilitySearchResponse, response_model_by_alias=True)
-async def search_stay_availability(
+def search_stay_availability(
     payload: StayAvailabilitySearchRequest,
     service: StayInventoryService = Depends(get_stay_inventory_service),
 ):
@@ -52,7 +52,7 @@ async def search_stay_availability(
 
 
 @router.post("/bookings", response_model=StayBookingResponse, response_model_by_alias=True, status_code=status.HTTP_201_CREATED)
-async def create_stay_booking(
+def create_stay_booking(
     payload: StayBookingCreate,
     service: StayInventoryService = Depends(get_stay_inventory_service),
 ):

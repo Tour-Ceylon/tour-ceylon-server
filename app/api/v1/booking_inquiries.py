@@ -4,11 +4,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ValidationError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_db
 from app.core.logging import logger
 from app.models.enum import InquiryStatus
+from app.models.transportBooking import TransportBooking
 from app.schemas.booking_inquiry_schema import (
     BookingInquiryCreate,
     BookingInquiryResponse,
@@ -19,6 +20,10 @@ from app.schemas.booking_inquiry_schema import (
 )
 from app.services.booking_inquiry_service import get_booking_inquiry_service
 from app.integrations.email_provider import email_provider
+from app.api.v1.transport import (
+    send_transport_notification_email,
+    send_transport_customer_confirmation_email,
+)
 
 router = APIRouter()
 
@@ -96,9 +101,25 @@ async def create_booking_inquiry(
             # Add background tasks to send both emails
             background_tasks.add_task(send_inquiry_notification_email, detailed_inquiry)  # Business team
             background_tasks.add_task(send_customer_confirmation_email, detailed_inquiry)  # Customer
-        
+
+        # Dispatch transport-specific emails for any auto-provisioned transport bookings
+        for provisioned in getattr(service, "last_provisioned_transports", []):
+            try:
+                tb = (
+                    db.query(TransportBooking)
+                    .options(joinedload(TransportBooking.vehicle_category))
+                    .filter(TransportBooking.id == provisioned.id)
+                    .first()
+                )
+                if tb:
+                    background_tasks.add_task(send_transport_notification_email, tb)
+                    background_tasks.add_task(send_transport_customer_confirmation_email, tb)
+                    logger.info("Queued transport emails for provisioned booking %s", tb.booking_reference)
+            except Exception as t_err:
+                logger.error("Failed to queue transport emails: %s", t_err)
+
         logger.info(f"Booking inquiry created successfully: {inquiry_response.reference}")
-        
+
         return inquiry_response
         
     except ValidationError as e:
@@ -118,6 +139,7 @@ async def create_booking_inquiry(
         )
     except Exception as e:
         logger.error(f"Error creating booking inquiry: {str(e)}")
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create booking inquiry"

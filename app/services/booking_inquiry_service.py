@@ -26,6 +26,7 @@ class BookingInquiryService:
     def __init__(self, db: Session):
         self.db = db
         self.repository = BookingInquiryRepository(db)
+        self.last_provisioned_transports = []
 
     def create_inquiry(self, inquiry_data: BookingInquiryCreate) -> BookingInquiryResponse:
         """
@@ -39,6 +40,12 @@ class BookingInquiryService:
             db_inquiry = self.repository.create(inquiry_data)
             
             logger.info(f"Created booking inquiry {db_inquiry.reference} for {db_inquiry.email} (Pending Vendor Review)")
+
+            # Auto-provision a TransportBooking if cart contains a transfer item
+            try:
+                self._auto_provision_transport_booking(db_inquiry, inquiry_data)
+            except Exception as tp_ex:
+                logger.error(f"Auto-provision transport booking failed for {db_inquiry.reference}: {tp_ex}")
             
             # Convert to response schema
             return BookingInquiryResponse(
@@ -488,6 +495,124 @@ class BookingInquiryService:
                 self.db.rollback()
                 logger.error(f"Failed to auto-provision StayBooking for inquiry {db_inquiry.reference}: {str(ex)}")
 
+
+    def _auto_provision_transport_booking(self, db_inquiry: BookingInquiry, inquiry_data: 'BookingInquiryCreate') -> None:
+        """
+        When a booking inquiry contains a transfer cart item (listing_id starts with 'transfer-'),
+        create a corresponding TransportBooking record so it appears in the admin Transport Requests page.
+        Parses route/pricing details from the special_requests string written by the frontend.
+        """
+        from app.models.vehicleCategory import VehicleCategory
+        from app.models.transportBooking import TransportBooking
+        from datetime import date, time
+        import re, random, string
+
+        self.last_provisioned_transports = []
+        for item in inquiry_data.cart_items:
+            lid = str(getattr(item, 'listing_id', '') or '').lower()
+            if not lid.startswith('transfer-'):
+                continue
+
+            # Derive the vehicle category slug from the listing_id
+            # listing_id format: "transfer-standard-sedan" -> slug: "standard-sedan"
+            category_slug = lid[len('transfer-'):]
+
+            # Resolve VehicleCategory by slug
+            vehicle_category = self.db.query(VehicleCategory).filter(
+                VehicleCategory.slug == category_slug
+            ).first()
+
+            if not vehicle_category:
+                logger.warning(
+                    f"Cannot auto-provision transport booking for {db_inquiry.reference}: "
+                    f"VehicleCategory with slug '{category_slug}' not found."
+                )
+                continue
+
+            # Parse special_requests metadata injected by the frontend
+            sr = db_inquiry.special_requests or ''
+            def _extract(pattern: str, text: str, default: str = '') -> str:
+                m = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+                return m.group(1).strip() if m else default
+
+            pickup_location   = _extract(r'Pickup Location:\s*(.+)', sr) or 'Unknown'
+            destination_loc   = _extract(r'Destination Location:\s*(.+)', sr) or 'Unknown'
+            travel_date_str   = _extract(r'Travel Date:\s*(\S+)', sr)
+            distance_str      = _extract(r'Distance:\s*([\d.]+)', sr, '0')
+            duration_str      = _extract(r'Duration:\s*(\d+)', sr, '0')
+            luggage_str       = _extract(r'Luggage Count:\s*(\d+)', sr, '0')
+
+            # Parse travel_date and pickup_time
+            try:
+                td_parts = travel_date_str.replace('T', ' ').split(' ')
+                travel_date_val = date.fromisoformat(td_parts[0]) if td_parts[0] else item.travel_date.date() if hasattr(item.travel_date, 'date') else date.today()
+                pickup_time_val = time.fromisoformat(td_parts[1][:8]) if len(td_parts) > 1 else time(12, 0)
+            except Exception:
+                travel_date_val = item.travel_date.date() if hasattr(item.travel_date, 'date') else date.today()
+                pickup_time_val = time(12, 0)
+
+            distance_km  = Decimal(distance_str) if distance_str else Decimal('0')
+            duration_min = int(duration_str) if duration_str.isdigit() else 0
+            luggage_cnt  = int(luggage_str)  if luggage_str.isdigit()  else 0
+
+            # Pricing: use item price as total; derive route_price from vehicle category
+            total_price   = Decimal(str(item.price))
+            base_fare     = Decimal(str(vehicle_category.base_fare))
+            price_per_km  = Decimal(str(vehicle_category.price_per_km))
+            route_price   = total_price - base_fare
+            if route_price < Decimal('0'):
+                route_price = Decimal('0')
+
+            # Generate unique transport booking reference tied to inquiry
+            timestamp   = db_inquiry.created_at.strftime('%Y%m%d') if db_inquiry.created_at else datetime.utcnow().strftime('%Y%m%d')
+            rand_suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+            transport_ref = f"TR-{timestamp}-{rand_suffix}"
+
+            db_transport = TransportBooking(
+                booking_reference=transport_ref,
+                vehicle_category_id=vehicle_category.id,
+
+                customer_name=f"{db_inquiry.first_name} {db_inquiry.last_name}",
+                customer_email=db_inquiry.email,
+                customer_phone=db_inquiry.phone,
+                customer_country=None,
+
+                pickup_location=pickup_location,
+                destination_location=destination_loc,
+
+                distance_km=distance_km,
+                estimated_duration_minutes=duration_min,
+
+                travel_date=travel_date_val,
+                pickup_time=pickup_time_val,
+
+                passengers_count=int(item.travel_count),
+                luggage_count=luggage_cnt,
+                special_requests=db_inquiry.special_requests,
+
+                base_fare=base_fare,
+                price_per_km=price_per_km,
+                route_price=route_price,
+                extra_charges=Decimal('0'),
+                total_price=total_price,
+                currency=str(item.base_currency.value) if hasattr(item.base_currency, 'value') else 'USD',
+
+                booking_status='pending',
+                payment_status='unpaid',
+            )
+
+            try:
+                self.db.add(db_transport)
+                self.db.commit()
+                self.db.refresh(db_transport)
+                self.last_provisioned_transports.append(db_transport)
+                logger.info(
+                    f"Auto-provisioned TransportBooking {transport_ref} for inquiry {db_inquiry.reference} "
+                    f"(category: {category_slug}, route: {pickup_location} → {destination_loc})"
+                )
+            except Exception as ex:
+                self.db.rollback()
+                logger.error(f"Failed to commit TransportBooking for inquiry {db_inquiry.reference}: {ex}")
 
 
 def get_booking_inquiry_service(db: Session) -> BookingInquiryService:

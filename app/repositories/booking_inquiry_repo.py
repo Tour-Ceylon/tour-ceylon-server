@@ -102,14 +102,34 @@ class BookingInquiryRepository:
             for item in inquiry_data.cart_items:
                 listing_id = getattr(item, 'listing_id', None)
                 if listing_id:
-                    try:
-                        listing = self.db.query(Listing).filter(Listing.id == listing_id).first()
-                        if listing and hasattr(listing.listing_type, 'value'):
-                            listing_types.add(listing.listing_type.value)
-                        elif listing and hasattr(listing, 'listing_type'):
-                            listing_types.add(str(listing.listing_type))
-                    except Exception:
-                        pass
+                    lid_str = str(listing_id).lower()
+                    if lid_str.startswith("transfer-"):
+                        listing_types.add("TRANSFER")
+                    elif lid_str.startswith("stay-") or lid_str.startswith("hotel-"):
+                        listing_types.add("STAY")
+                    elif lid_str.startswith("safari-"):
+                        listing_types.add("SAFARI")
+                    elif lid_str.startswith("tour-"):
+                        listing_types.add("TOUR")
+                    elif lid_str.startswith("experience-"):
+                        listing_types.add("EXPERIENCE")
+                    elif lid_str.startswith("package-"):
+                        listing_types.add("PACKAGE")
+                    else:
+                        try:
+                            listing = None
+                            try:
+                                UUID(str(listing_id))
+                                listing = self.db.query(Listing).filter(Listing.id == listing_id).first()
+                            except (ValueError, TypeError, AttributeError):
+                                listing = self.db.query(Listing).filter(Listing.slug == str(listing_id)).first()
+
+                            if listing and hasattr(listing.listing_type, 'value'):
+                                listing_types.add(listing.listing_type.value)
+                            elif listing and hasattr(listing, 'listing_type'):
+                                listing_types.add(str(listing.listing_type))
+                        except Exception:
+                            self.db.rollback()
             
             if len(listing_types) > 1:
                 prefix = "MIX"
