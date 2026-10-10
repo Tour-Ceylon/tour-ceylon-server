@@ -414,6 +414,10 @@ class AdminDashboardService:
             normalized["languages_spoken"] = list(normalized.get("languages_spoken") or [])
             normalized["meal_plans"] = list(normalized.get("meal_plans") or [])
         elif detail_key == "tour_detail":
+            if normalized.get("category_id") is not None:
+                normalized["category_id"] = str(normalized["category_id"])
+            normalized["additional_categories"] = list(normalized.get("additional_categories") or [])
+            normalized["itinerary"] = list(normalized.get("itinerary") or [])
             normalized["itinerary_highlights"] = list(normalized.get("itinerary_highlights") or [])
             normalized["included_items"] = list(normalized.get("included_items") or [])
             normalized["excluded_items"] = list(normalized.get("excluded_items") or [])
@@ -594,6 +598,9 @@ class AdminDashboardService:
             "duration_days": detail.duration_days,
             "route_summary": detail.route_summary,
             "meeting_point": detail.meeting_point,
+            "category_id": detail.category_id,
+            "additional_categories": detail.additional_categories or [],
+            "itinerary": detail.itinerary or [],
             "itinerary_highlights": detail.itinerary_highlights or [],
             "included_items": detail.included_items or [],
             "excluded_items": detail.excluded_items or [],
