@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 from app.api.errors import AdminAPIError
 from app.integrations.cloudinary import CloudinaryIntegrationError, delete_image, upload_image
 from app.models.enum import MediaOwnerType
-from app.repositories.admin.package_repo import AdminPackageRepository
 from app.repositories.listing_repo import ListingRepository
 from app.repositories.media_repo import MediaRepository
 
@@ -29,7 +28,6 @@ class MediaService:
         self.db = db
         self.media_repo = MediaRepository(db)
         self.listing_repo = ListingRepository(db)
-        self.package_repo = AdminPackageRepository(db)
 
     def upload_listing_media(
         self,
@@ -50,24 +48,8 @@ class MediaService:
         )
         return self._build_owner_response(listing)
 
-    def upload_package_media(
-        self,
-        package_id: UUID,
-        files: list[UploadFile],
-        alt_texts: list[str] | None = None,
-        is_primary: bool = False,
-        sort_orders: list[int] | None = None,
-    ) -> dict:
-        package = self._get_package(package_id)
-        self._upload_media(
-            owner_type=MediaOwnerType.PACKAGE,
-            owner=package,
-            files=files,
-            alt_texts=alt_texts,
-            is_primary=is_primary,
-            sort_orders=sort_orders,
-        )
-        return self._build_owner_response(package)
+    def upload_package_media(self, *args, **kwargs) -> dict:
+        raise NotImplementedError("Not implemented")
 
     def list_owner_media(self, owner_type: MediaOwnerType, owner_id: UUID) -> dict:
         owner = self._get_owner(owner_type, owner_id)
@@ -218,15 +200,12 @@ class MediaService:
         return listing
 
     def _get_package(self, package_id: UUID):
-        package = self.package_repo.get(package_id)
-        if package is None:
-            raise AdminAPIError(status.HTTP_404_NOT_FOUND, "Package not found")
-        return package
+        raise NotImplementedError("Not implemented")
 
     def _get_owner(self, owner_type: MediaOwnerType, owner_id: UUID):
         if owner_type == MediaOwnerType.LISTING:
             return self._get_listing(owner_id)
-        return self._get_package(owner_id)
+        raise NotImplementedError("Not implemented")
 
     def _get_owner_media_or_404(self, owner_type: MediaOwnerType, owner_id: UUID, media_id: UUID):
         media = self.media_repo.get_media_by_id(media_id)
@@ -280,7 +259,7 @@ class MediaService:
         if owner_type == MediaOwnerType.LISTING:
             self.listing_repo.update_cover_media(owner, media_id)
         else:
-            self.package_repo.update_cover_media(owner, media_id)
+            raise NotImplementedError("Not implemented")
 
     def _cleanup_uploaded_assets(self, public_ids: list[str]) -> None:
         for public_id in public_ids:

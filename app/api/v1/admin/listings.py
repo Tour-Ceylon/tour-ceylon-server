@@ -1,6 +1,8 @@
+from datetime import date, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
+from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 
@@ -68,8 +70,9 @@ def _ensure_category_matches_listing(service: MediaService, category: str, listi
 async def create_stay_listing(
     payload: StayListingCreate,
     service: AdminDashboardService = Depends(get_admin_service),
+    current_user: User = Depends(get_current_user),
 ):
-    return service.create_listing("stay", payload.model_dump(by_alias=False))
+    return service.create_listing("stay", payload.model_dump(by_alias=False), current_user)
 
 
 @router.post(
@@ -87,8 +90,9 @@ async def create_stay_listing(
 async def create_tour_listing(
     payload: TourListingCreate,
     service: AdminDashboardService = Depends(get_admin_service),
+    current_user: User = Depends(get_current_user),
 ):
-    return service.create_listing("tour", payload.model_dump(by_alias=False))
+    return service.create_listing("tour", payload.model_dump(by_alias=False), current_user)
 
 
 @router.post(
@@ -106,8 +110,9 @@ async def create_tour_listing(
 async def create_safari_listing(
     payload: SafariListingCreate,
     service: AdminDashboardService = Depends(get_admin_service),
+    current_user: User = Depends(get_current_user),
 ):
-    return service.create_listing("safari", payload.model_dump(by_alias=False))
+    return service.create_listing("safari", payload.model_dump(by_alias=False), current_user)
 
 
 @router.post(
@@ -125,8 +130,9 @@ async def create_safari_listing(
 async def create_experience_listing(
     payload: ExperienceListingCreate,
     service: AdminDashboardService = Depends(get_admin_service),
+    current_user: User = Depends(get_current_user),
 ):
-    return service.create_listing("experience", payload.model_dump(by_alias=False))
+    return service.create_listing("experience", payload.model_dump(by_alias=False), current_user)
 
 
 @router.post(
@@ -144,8 +150,9 @@ async def create_experience_listing(
 async def create_transfer_listing(
     payload: TransferListingCreate,
     service: AdminDashboardService = Depends(get_admin_service),
+    current_user: User = Depends(get_current_user),
 ):
-    return service.create_listing("transfer", payload.model_dump(by_alias=False))
+    return service.create_listing("transfer", payload.model_dump(by_alias=False), current_user)
 
 
 @router.get(
@@ -233,6 +240,111 @@ def get_transfer_listings(
     return service.get_listings("transfer", current_user)
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Generic Listing Blocks (date blackouts for tour / safari / experience / etc.)
+# ──────────────────────────────────────────────────────────────────────────────
+
+from app.config.database import get_db
+from app.models.listingBlock import ListingBlock
+from app.models.listing import Listing
+from app.schemas.safari_schema import SafariBlockCreate, SafariBlockResponse, SafariBlockListResponse
+
+
+def _require_listing(db: Session, listing_id: UUID) -> Listing:
+    listing = db.query(Listing).filter(Listing.id == listing_id).first()
+    if listing is None:
+        from app.api.errors import AdminAPIError
+        raise AdminAPIError(status_code=status.HTTP_404_NOT_FOUND, message="Listing not found")
+    return listing
+
+
+@router.get(
+    "/{listing_id}/blocks",
+    response_model=SafariBlockListResponse,
+)
+async def get_listing_blocks(
+    listing_id: UUID,
+    start_date: date = Query(None, alias="startDate"),
+    end_date: date = Query(None, alias="endDate"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_listing(db, listing_id)
+    query = db.query(ListingBlock).filter(ListingBlock.listing_id == listing_id)
+    if start_date:
+        query = query.filter(ListingBlock.end_date >= start_date)
+    if end_date:
+        query = query.filter(ListingBlock.start_date <= end_date)
+    blocks = query.all()
+    return SafariBlockListResponse(blocks=blocks)
+
+
+@router.post(
+    "/{listing_id}/blocks",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_listing_block(
+    listing_id: UUID,
+    payload: SafariBlockCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_listing(db, listing_id)
+
+    if not payload.variantIds:
+        block = ListingBlock(
+            listing_id=listing_id,
+            variant_id=None,
+            start_date=datetime.strptime(payload.startDate, "%Y-%m-%d").date(),
+            end_date=datetime.strptime(payload.endDate, "%Y-%m-%d").date(),
+            reason=payload.reason,
+            block_type=payload.blockType,
+        )
+        db.add(block)
+        db.commit()
+        db.refresh(block)
+        return block
+
+    created_blocks = []
+    for var_id in payload.variantIds:
+        block = ListingBlock(
+            listing_id=listing_id,
+            variant_id=UUID(var_id),
+            start_date=datetime.strptime(payload.startDate, "%Y-%m-%d").date(),
+            end_date=datetime.strptime(payload.endDate, "%Y-%m-%d").date(),
+            reason=payload.reason,
+            block_type=payload.blockType,
+        )
+        db.add(block)
+        created_blocks.append(block)
+
+    db.commit()
+    return {"message": "Blocks created", "count": len(created_blocks)}
+
+
+@router.delete(
+    "/{listing_id}/blocks/{block_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_listing_block(
+    listing_id: UUID,
+    block_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_listing(db, listing_id)
+    block = db.query(ListingBlock).filter(
+        ListingBlock.id == block_id,
+        ListingBlock.listing_id == listing_id,
+    ).first()
+    if not block:
+        from app.api.errors import AdminAPIError
+        raise AdminAPIError(status_code=status.HTTP_404_NOT_FOUND, message="Block not found")
+    db.delete(block)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get(
     "/{category}/{listing_id}",
     response_model=AdminListingResponse,
@@ -274,6 +386,11 @@ async def update_listing_status(
     return service.update_listing_status(category, listing_id, payload.status)
 
 
+@router.put(
+    "/{category}/{listing_id}",
+    response_model=AdminListingResponse,
+    response_model_by_alias=True,
+)
 @router.patch(
     "/{category}/{listing_id}",
     response_model=AdminListingResponse,
@@ -287,6 +404,31 @@ async def update_listing(
 ):
     return service.update_listing(
         category,
+        listing_id,
+        payload.model_dump(by_alias=False, exclude_unset=True),
+    )
+
+
+@router.put(
+    "/{listing_id}",
+    response_model=AdminListingResponse,
+    response_model_by_alias=True,
+)
+@router.patch(
+    "/{listing_id}",
+    response_model=AdminListingResponse,
+    response_model_by_alias=True,
+)
+async def update_listing_any(
+    listing_id: UUID,
+    payload: ListingUpdateRequest,
+    service: AdminDashboardService = Depends(get_admin_service),
+    current_user: User = Depends(get_current_user),
+):
+    listing = service.get_any_listing_by_id(listing_id, current_user)
+    cat = listing.listing_type.value if hasattr(listing.listing_type, 'value') else str(listing.listing_type)
+    return service.update_listing(
+        cat,
         listing_id,
         payload.model_dump(by_alias=False, exclude_unset=True),
     )
@@ -391,3 +533,4 @@ async def delete_listing_media(
 ):
     _ensure_category_matches_listing(service, category, listing_id)
     return service.delete_media(MediaOwnerType.LISTING, listing_id, media_id)
+

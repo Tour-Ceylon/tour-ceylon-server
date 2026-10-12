@@ -39,6 +39,23 @@ class ListingType(str, Enum):
     EXPERIENCE = "experience"
     HOTEL = "hotel"
 
+    # Aliases for compatibility
+    STAY = "hotel"
+    ACTIVITY = "experience"
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            val_lower = value.lower()
+            if val_lower in ("stay", "stays", "hotel"):
+                return cls.HOTEL
+            if val_lower in ("activity", "activities", "experience"):
+                return cls.EXPERIENCE
+            for member in cls:
+                if member.value.lower() == val_lower:
+                    return member
+        return None
+
 
 class ListingStatus(str, Enum):
     DRAFT = "DRAFT"
