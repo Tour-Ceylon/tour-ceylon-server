@@ -16,6 +16,13 @@ class StayAmenityInput(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
+    @model_validator(mode="before")
+    @classmethod
+    def pre_validate(cls, data):
+        if isinstance(data, str):
+            return {"name": data, "value": True, "category": "property", "valueType": "boolean"}
+        return data
+
 
 class StayRoomTypeInput(BaseModel):
     id: UUID | None = None
@@ -150,15 +157,17 @@ class StayPropertyUpdate(BaseModel):
     application_note: str | None = Field(default=None, alias="applicationNote")
     contact: dict | None = None
     policies: dict | None = None
+    payment_policy: str | None = Field(default=None, alias="paymentPolicy")
     media: list[dict] | None = None
     amenities: list[StayAmenityInput] | None = None
+    room_types: list[StayRoomTypeInput] | None = Field(default=None, alias="roomTypes")
     metadata: dict | None = None
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
     @model_validator(mode="after")
     def validate_coordinate_pair(self):
-        if (self.latitude is None) != (self.longitude is None):
+        if (self.latitude is not None or self.longitude is not None) and ((self.latitude is None) != (self.longitude is None)):
             raise ValueError("latitude and longitude must be provided together")
         return self
 

@@ -165,7 +165,7 @@ async def create_transfer_listing(
     response_model=list[StayListingResponse],
     response_model_by_alias=True,
 )
-async def get_stay_listings(
+def get_stay_listings(
     service: AdminDashboardService = Depends(get_admin_service),
     current_user: User = Depends(get_current_user),
 ):
@@ -182,7 +182,7 @@ async def get_stay_listings(
     response_model=list[TourListingResponse],
     response_model_by_alias=True,
 )
-async def get_tour_listings(
+def get_tour_listings(
     service: AdminDashboardService = Depends(get_admin_service),
     current_user: User = Depends(get_current_user),
 ):
@@ -199,7 +199,7 @@ async def get_tour_listings(
     response_model=list[SafariListingResponse],
     response_model_by_alias=True,
 )
-async def get_safari_listings(
+def get_safari_listings(
     service: AdminDashboardService = Depends(get_admin_service),
     current_user: User = Depends(get_current_user),
 ):
@@ -216,7 +216,7 @@ async def get_safari_listings(
     response_model=list[ExperienceListingResponse],
     response_model_by_alias=True,
 )
-async def get_experience_listings(
+def get_experience_listings(
     service: AdminDashboardService = Depends(get_admin_service),
     current_user: User = Depends(get_current_user),
 ):
@@ -233,7 +233,7 @@ async def get_experience_listings(
     response_model=list[TransferListingResponse],
     response_model_by_alias=True,
 )
-async def get_transfer_listings(
+def get_transfer_listings(
     service: AdminDashboardService = Depends(get_admin_service),
     current_user: User = Depends(get_current_user),
 ):
@@ -350,7 +350,7 @@ async def delete_listing_block(
     response_model=AdminListingResponse,
     response_model_by_alias=True,
 )
-async def get_listing_by_category_and_id(
+def get_listing_by_category_and_id(
     category: AdminListingCategory,
     listing_id: UUID,
     service: AdminDashboardService = Depends(get_admin_service),
@@ -364,7 +364,7 @@ async def get_listing_by_category_and_id(
     response_model=AdminListingResponse,
     response_model_by_alias=True,
 )
-async def get_listing_by_id(
+def get_listing_by_id(
     listing_id: UUID,
     service: AdminDashboardService = Depends(get_admin_service),
     current_user: User = Depends(get_current_user),

@@ -56,8 +56,9 @@ else:
     engine_kwargs.update(
         {
             "pool_recycle": 300,
-            "pool_size": 3,
-            "max_overflow": 5,
+            "pool_size": 10,
+            "max_overflow": 10,
+            "pool_timeout": 30,
         }
     )
 

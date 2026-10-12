@@ -5,6 +5,7 @@ from uuid import UUID
 
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.integrations.cloudinary import upload_image
 from app.models.destination import Destination
@@ -31,7 +32,7 @@ from app.models.stay import (
     StayRoomType,
     StayRoomUnit,
 )
-from app.schemas.stay_schema import StayPropertyCreate
+from app.schemas.stay_schema import StayPropertyCreate, StayPropertyUpdate
 
 
 class StayRepository:
@@ -129,6 +130,107 @@ class StayRepository:
     def update_for_vendor(self, vendor_id: UUID, property_id: UUID, payload: StayPropertyCreate) -> StayProperty | None:
         return self.update_property(property_id, payload, user_id=vendor_id, is_admin=False)
 
+    def patch_property(
+        self, property_id: UUID, payload: StayPropertyUpdate, user_id: UUID, is_admin: bool = False
+    ) -> StayProperty | None:
+        if is_admin:
+            db_property = self.get_by_id(property_id)
+            if db_property is None:
+                from app.models.listing import Listing
+                listing = self.db.query(Listing).filter(Listing.id == property_id).first()
+                if listing:
+                    db_property = self.create_from_listing(listing.vendor_id, property_id)
+        else:
+            db_property = self.get_for_vendor(user_id, property_id)
+            if db_property is None:
+                db_property = self.create_from_listing(user_id, property_id)
+
+        if db_property is None:
+            return None
+
+        try:
+            data = payload.model_dump(exclude_unset=True, by_alias=False)
+            target_vendor_id = db_property.vendor_id
+
+            previous_status = str(db_property.status or "").lower()
+            incoming_status = str(data.get("status") or "").lower()
+
+            if "status" in data:
+                if previous_status in {"approved", "published"} and incoming_status != "draft" and not is_admin:
+                    data["status"] = previous_status
+                elif is_admin and incoming_status in {"submitted", "approved", "published"}:
+                    data["status"] = "approved"
+
+            direct_fields = [
+                "name",
+                "property_type",
+                "description",
+                "address",
+                "city",
+                "district",
+                "latitude",
+                "longitude",
+                "status",
+                "application_note",
+                "payment_policy",
+            ]
+            for field in direct_fields:
+                if field in data and data[field] is not None:
+                    setattr(db_property, field, data[field])
+
+            if "contact" in data and data["contact"] is not None:
+                merged_contact = dict(db_property.contact or {})
+                merged_contact.update(data["contact"])
+                db_property.contact = merged_contact
+                flag_modified(db_property, "contact")
+
+            if "policies" in data and data["policies"] is not None:
+                merged_policies = dict(db_property.policies or {})
+                merged_policies.update(data["policies"])
+                db_property.policies = merged_policies
+                flag_modified(db_property, "policies")
+
+            if "metadata" in data and data["metadata"] is not None:
+                merged_metadata = dict(db_property.metadata_json or {})
+                merged_metadata.update(data["metadata"])
+                db_property.metadata_json = merged_metadata
+                flag_modified(db_property, "metadata_json")
+
+            if "media" in data and data["media"] is not None:
+                db_property.media = self._normalize_media_payload(
+                    data["media"],
+                    vendor_id=target_vendor_id,
+                )
+                flag_modified(db_property, "media")
+
+            if "amenities" in data and data["amenities"] is not None:
+                for amenity_map in list(db_property.amenities or []):
+                    self.db.delete(amenity_map)
+                self.db.flush()
+
+                for amenity_data in data["amenities"]:
+                    amenity = self._get_or_create_amenity(amenity_data)
+                    self.db.add(
+                        StayPropertyAmenityMap(
+                            property_id=db_property.id,
+                            amenity_id=amenity.id,
+                            value=self._wrap_amenity_value(amenity_data.get("value")),
+                        )
+                    )
+
+            if "room_types" in data and data["room_types"] is not None:
+                self._replace_children(db_property, {"room_types": data["room_types"]})
+
+            self._ensure_listing_projection(db_property)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+        return self.get_by_id(db_property.id)
+
+    def patch_for_vendor(self, vendor_id: UUID, property_id: UUID, payload: StayPropertyUpdate) -> StayProperty | None:
+        return self.patch_property(property_id, payload, user_id=vendor_id, is_admin=False)
+
     def list_for_vendor(self, vendor_id: UUID) -> list[StayProperty]:
         properties = (
             self._base_query()
@@ -136,12 +238,16 @@ class StayRepository:
             .order_by(StayProperty.created_at.desc())
             .all()
         )
-        self._ensure_listing_projection_for_many(properties)
+        missing = [p for p in properties if p.listing_id is None]
+        if missing:
+            self._ensure_listing_projection_for_many(missing)
         return properties
 
     def list_all(self) -> list[StayProperty]:
         properties = self._base_query().order_by(StayProperty.created_at.desc()).all()
-        self._ensure_listing_projection_for_many(properties)
+        missing = [p for p in properties if p.listing_id is None]
+        if missing:
+            self._ensure_listing_projection_for_many(missing)
         return properties
 
     def get_for_vendor(self, vendor_id: UUID, property_id: UUID) -> StayProperty | None:
@@ -153,7 +259,7 @@ class StayRepository:
             )
             .first()
         )
-        if property_record is not None:
+        if property_record is not None and property_record.listing_id is None:
             self._ensure_listing_projection(property_record)
             self.db.commit()
         return property_record
@@ -169,7 +275,7 @@ class StayRepository:
             listing = self.db.query(Listing).filter(Listing.id == property_id).first()
             if listing:
                 property_record = self.create_from_listing(listing.vendor_id, property_id)
-        if property_record is not None:
+        if property_record is not None and property_record.listing_id is None:
             self._ensure_listing_projection(property_record)
             self.db.commit()
         return property_record
@@ -614,7 +720,9 @@ class StayRepository:
         }
 
         room_types = list(property_record.room_types or [])
+        is_fallback = False
         if not room_types:
+            is_fallback = True
             room_types = [
                 StayRoomType(
                     name="Standard Room",
@@ -623,6 +731,14 @@ class StayRepository:
                     currency=CurrencyCode.LKR.value,
                 )
             ]
+
+        # When real room types exist, prune any obsolete variants (like previous dummy fallback Standard Room)
+        if not is_fallback:
+            valid_room_names = {(rt.name or "").strip().lower() for rt in room_types if rt.name}
+            for existing_variant in list(listing.variants or []):
+                if existing_variant.name.strip().lower() not in valid_room_names:
+                    self.db.delete(existing_variant)
+            self.db.flush()
 
         for index, room_type in enumerate(room_types):
             amount = float(room_type.base_price or 0)
@@ -636,6 +752,7 @@ class StayRepository:
                 existing.capacity_max = capacity_max
                 existing.is_default = (index == 0)
                 existing.booking_unit = BookingUnit.PER_ROOM
+                existing.is_active = not is_fallback
                 variant = existing
             else:
                 variant = ListingVariant(
@@ -645,6 +762,7 @@ class StayRepository:
                     capacity_min=1,
                     capacity_max=capacity_max,
                     is_default=(index == 0),
+                    is_active=not is_fallback,
                 )
                 self.db.add(variant)
                 self.db.flush()

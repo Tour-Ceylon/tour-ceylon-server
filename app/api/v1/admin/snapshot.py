@@ -10,7 +10,7 @@ router = APIRouter()
 
 
 @router.get("/snapshot", response_model=AdminSnapshotResponse, response_model_by_alias=True)
-async def get_snapshot(
+def get_snapshot(
     service: AdminDashboardService = Depends(get_admin_service),
     current_user: User = Depends(get_current_user)
 ):
