@@ -474,16 +474,26 @@ class AdminDashboardService:
             )
         return normalized_media
 
-    def _parse_time(self, raw_value: str | time) -> time:
+    def _parse_time(self, raw_value: str | time | None) -> time | None:
+        if raw_value is None:
+            return None
         if isinstance(raw_value, time):
             return raw_value
+        val_str = str(raw_value).strip()
+        if not val_str:
+            return None
         try:
-            return time.fromisoformat(raw_value)
-        except ValueError as exc:
-            raise AdminAPIError(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                message=f"Invalid time value: {raw_value}",
-            ) from exc
+            return time.fromisoformat(val_str)
+        except ValueError:
+            try:
+                from datetime import datetime
+                return datetime.strptime(val_str, "%I:%M %p").time()
+            except Exception as exc:
+                raise AdminAPIError(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    message=f"Invalid time value: {raw_value}",
+                ) from exc
+
 
     def _detail_key_for_category(self, category: str) -> str:
         return {

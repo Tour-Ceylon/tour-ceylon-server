@@ -48,11 +48,11 @@ class BookingService:
 
     def _generate_booking_reference(self, listing_type: ListingType) -> str:
         base = uuid4().hex[:8].upper()
-        if listing_type == ListingType.STAY:
+        if listing_type in (ListingType.HOTEL, ListingType.STAY):
             return f"BK-STY-{base}"
         elif listing_type == ListingType.SAFARI:
             return f"BK-SAF-{base}"
-        elif listing_type == ListingType.ACTIVITY:
+        elif listing_type in (ListingType.EXPERIENCE, ListingType.ACTIVITY):
             return f"BK-EXP-{base}"
         return f"TC-BKG-{base}"
 
@@ -72,7 +72,7 @@ class BookingService:
 
         nights_list: List[NightlyAvailability] = []
 
-        if listing.listing_type == ListingType.STAY:
+        if listing.listing_type in (ListingType.HOTEL, ListingType.STAY):
             from app.services.stay_inventory_service import StayInventoryService
             inv_service = StayInventoryService(self.db)
             property_record = inv_service.get_property(listing_id)
@@ -128,28 +128,33 @@ class BookingService:
             while current < end_date:
                 is_blocked = any(b.start_date <= current <= b.end_date for b in blocks if not b.variant_id)
                 if is_blocked:
-                    total, booked, blocked, avail = 0, 0, 1, 0
+                    listing_cap = sum(v.capacity_max or 1 for v in variants) if variants else 1
+                    total, booked, blocked, avail = listing_cap, 0, listing_cap, 0
                 else:
-                    total, booked, blocked, avail = 0, 0, 0, 0
-                    for variant in variants:
-                        v_is_blocked = any(b.start_date <= current <= b.end_date for b in blocks if b.variant_id == variant.id)
-                        if v_is_blocked:
-                            blocked += (variant.capacity_max or 1)
-                            total += (variant.capacity_max or 1)
-                            continue
+                    if not variants:
+                        # Listing has no explicit variants (e.g. tour packages without seeded variants)
+                        total, booked, blocked, avail = 1, 0, 0, 1
+                    else:
+                        total, booked, blocked, avail = 0, 0, 0, 0
+                        for variant in variants:
+                            v_is_blocked = any(b.start_date <= current <= b.end_date for b in blocks if b.variant_id == variant.id)
+                            if v_is_blocked:
+                                blocked += (variant.capacity_max or 1)
+                                total += (variant.capacity_max or 1)
+                                continue
 
-                        avail_cal = self.db.query(AvailabilityCalendar).filter(
-                            AvailabilityCalendar.variant_id == variant.id,
-                            func.date(AvailabilityCalendar.service_date) == current
-                        ).first()
+                            avail_cal = self.db.query(AvailabilityCalendar).filter(
+                                AvailabilityCalendar.variant_id == variant.id,
+                                func.date(AvailabilityCalendar.service_date) == current
+                            ).first()
 
-                        if avail_cal:
-                            total += avail_cal.total_capacity
-                            booked += avail_cal.reserved_capacity
-                            avail += avail_cal.available_capacity
-                        else:
-                            total += (variant.capacity_max or 1)
-                            avail += (variant.capacity_max or 1)
+                            if avail_cal:
+                                total += avail_cal.total_capacity
+                                booked += avail_cal.reserved_capacity
+                                avail += avail_cal.available_capacity
+                            else:
+                                total += (variant.capacity_max or 1)
+                                avail += (variant.capacity_max or 1)
 
                 day_status = "OPEN" if avail > 0 else "SOLD_OUT"
                 nights_list.append(
@@ -231,7 +236,17 @@ class BookingService:
         for item_data in payload.booking_items:
             item_dict = item_data.model_dump()
             travelers_data = item_dict.pop("travelers", [])
-            booking_item = BookingItem(booking_id=booking.id, **item_dict)
+            item_dict.pop("selected_rooms", None)
+            item_dict.pop("selectedRooms", None)
+            booking_item = BookingItem(
+                booking_id=booking.id,
+                listing_id=item_dict.get("listing_id"),
+                variant_id=item_dict.get("variant_id"),
+                travel_date=item_dict.get("travel_date"),
+                quantity=item_dict.get("quantity"),
+                unit_price=item_dict.get("unit_price"),
+                total_price=item_dict.get("total_price"),
+            )
             self.db.add(booking_item)
             self.db.flush()
 
@@ -242,7 +257,7 @@ class BookingService:
         check_in = payload.check_in_date or first_item.travel_date
         check_out = payload.check_out_date or (check_in + timedelta(days=1))
 
-        if listing.listing_type == ListingType.STAY:
+        if listing.listing_type in (ListingType.HOTEL, ListingType.STAY):
             self._process_stay_booking(booking, payload, first_item, check_in, check_out)
         else:
             self._process_variant_booking(booking, payload, listing, check_in, check_out)
@@ -262,14 +277,18 @@ class BookingService:
             "status": booking_status.value,
         }
 
-        try:
-            if payload.payment_method == PaymentMethod.PAY_AT_PROPERTY:
-                email_provider.send_booking_confirmation_pay_at_property(booking_data)
-            else:
-                email_provider.send_booking_bank_transfer_instructions(booking_data)
-            email_provider.send_vendor_new_booking_alert(booking_data)
-        except Exception as e:
-            logger.error("Error dispatching booking notification emails: %s", str(e))
+        def _send_emails():
+            try:
+                if payload.payment_method == PaymentMethod.PAY_AT_PROPERTY:
+                    email_provider.send_booking_confirmation_pay_at_property(booking_data)
+                else:
+                    email_provider.send_booking_bank_transfer_instructions(booking_data)
+                email_provider.send_vendor_new_booking_alert(booking_data)
+            except Exception as e:
+                logger.error("Error dispatching booking notification emails: %s", str(e))
+
+        import threading
+        threading.Thread(target=_send_emails, daemon=True).start()
 
         return self.get_booking_by_id(booking.id)
 
@@ -563,7 +582,7 @@ class BookingService:
                 listing = self.db.query(Listing).filter(Listing.id == item.listing_id).first()
                 if not listing: continue
 
-                if listing.listing_type == ListingType.STAY:
+                if listing.listing_type in (ListingType.HOTEL, ListingType.STAY):
                     stay_booking = self.db.query(StayBooking).filter(StayBooking.booking_id == booking.id).first()
                     if stay_booking:
                         curr = stay_booking.check_in_date

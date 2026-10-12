@@ -46,7 +46,7 @@ Best,
 
             msg.attach(MIMEText(body, 'plain'))
 
-            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=5) as server:
                 server.starttls()
                 server.login(self.smtp_user, self.smtp_password)
                 server.send_message(msg)
@@ -130,7 +130,7 @@ Tour Ceylon System
 
             msg.attach(MIMEText(body, 'plain'))
 
-            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=5) as server:
                 server.starttls()
                 server.login(self.smtp_user, self.smtp_password)
                 server.send_message(msg)
@@ -221,7 +221,7 @@ If you need immediate assistance, please contact us using the details above.
 
             msg.attach(MIMEText(body, 'plain'))
 
-            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=5) as server:
                 server.starttls()
                 server.login(self.smtp_user, self.smtp_password)
                 server.send_message(msg)
@@ -297,7 +297,7 @@ Email: {self.email_from}
 """
             msg.attach(MIMEText(body, 'plain'))
 
-            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=5) as server:
                 server.starttls()
                 server.login(self.smtp_user, self.smtp_password)
                 server.send_message(msg)
@@ -350,7 +350,7 @@ Best regards,
 Tour Ceylon Team
 """
             msg.attach(MIMEText(body, 'plain'))
-            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=5) as server:
                 server.starttls()
                 server.login(self.smtp_user, self.smtp_password)
                 server.send_message(msg)
@@ -403,7 +403,7 @@ Best regards,
 Tour Ceylon Team
 """
             msg.attach(MIMEText(body, 'plain'))
-            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=5) as server:
                 server.starttls()
                 server.login(self.smtp_user, self.smtp_password)
                 server.send_message(msg)
@@ -453,7 +453,7 @@ Best regards,
 Tour Ceylon Team
 """
             msg.attach(MIMEText(body, 'plain'))
-            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=5) as server:
                 server.starttls()
                 server.login(self.smtp_user, self.smtp_password)
                 server.send_message(msg)
@@ -492,7 +492,7 @@ Best regards,
 Tour Ceylon System
 """
             msg.attach(MIMEText(body, 'plain'))
-            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=5) as server:
                 server.starttls()
                 server.login(self.smtp_user, self.smtp_password)
                 server.send_message(msg)
@@ -529,7 +529,7 @@ Best regards,
 Tour Ceylon System
 """
             msg.attach(MIMEText(body, 'plain'))
-            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=5) as server:
                 server.starttls()
                 server.login(self.smtp_user, self.smtp_password)
                 server.send_message(msg)
