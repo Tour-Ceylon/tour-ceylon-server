@@ -21,6 +21,10 @@ class CartItemSchema(BaseModel):
     price: Decimal = Field(ge=0)
     base_currency: CurrencyCode = Field(default=CurrencyCode.USD, alias="baseCurrency")
     selected_rooms: list[Any] | None = Field(None, alias="selectedRooms")
+    vendor_id: str | None = Field(None, alias="vendorId")
+    vendor_name: str | None = Field(None, alias="vendorName")
+    vendor_email: str | None = Field(None, alias="vendorEmail")
+    vendor_role: str | None = Field(None, alias="vendorRole")
 
     @model_validator(mode="before")
     @classmethod
@@ -151,6 +155,10 @@ class BookingInquiryDetailed(BookingInquiryBase):
     status: InquiryStatus
     created_at: datetime
     updated_at: datetime
+    vendor_id: str | None = Field(None, alias="vendorId")
+    vendor_name: str | None = Field(None, alias="vendorName")
+    vendor_email: str | None = Field(None, alias="vendorEmail")
+    vendor_role: str | None = Field(None, alias="vendorRole")
     
     model_config = ConfigDict(
         from_attributes=True,

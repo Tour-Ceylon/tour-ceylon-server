@@ -81,6 +81,9 @@ class AdminTourDetail(BaseModel):
     route_summary: str = Field(alias="routeSummary")
     meeting_point: str = Field(alias="meetingPoint")
     itinerary_highlights: list[str] = Field(default_factory=list, alias="itineraryHighlights")
+    itinerary: list[dict] = Field(default_factory=list)
+    category_id: str | None = Field(default=None, alias="categoryId")
+    additional_categories: list[str] = Field(default_factory=list, alias="additionalCategories")
     included_items: list[str] = Field(default_factory=list, alias="includedItems")
     excluded_items: list[str] = Field(default_factory=list, alias="excludedItems")
     languages: list[str] = Field(default_factory=list)
@@ -103,6 +106,8 @@ class AdminTourDetail(BaseModel):
 
     @field_validator(
         "itinerary_highlights",
+        "itinerary",
+        "additional_categories",
         "included_items",
         "excluded_items",
         "languages",

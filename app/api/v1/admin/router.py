@@ -5,7 +5,6 @@ from app.api.v1.admin import (
     destinations,
     drivers,
     listings,
-    packages,
     reset,
     settings,
     snapshot,
@@ -16,7 +15,6 @@ from app.api.v1.admin import (
 
 router = APIRouter()
 router.include_router(snapshot.router)
-router.include_router(packages.router)
 router.include_router(addons.router)
 router.include_router(destinations.router)
 router.include_router(listings.router)

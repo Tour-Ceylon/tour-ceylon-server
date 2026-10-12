@@ -190,15 +190,27 @@ def update_vendor_inquiry_status(
     if not inq:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking inquiry not found")
 
-    new_status = payload.status.lower()
+    raw_status = payload.status.lower()
+    status_map = {
+        "pending": "pending_contact",
+        "pending_contact": "pending_contact",
+        "contacted": "contacted",
+        "quoted": "quoted",
+        "confirmed": "quoted",
+        "completed": "converted_to_booking",
+        "converted_to_booking": "converted_to_booking",
+        "cancelled": "cancelled",
+        "rejected": "cancelled",
+    }
+    new_status = status_map.get(raw_status, raw_status)
     inq.status = new_status
     db.commit()
     db.refresh(inq)
 
     st_val = getattr(inq.status, "value", str(inq.status)).lower()
 
-    # Trigger room unit allocation and customer notification when vendor accepts/confirms booking
-    if new_status in ("quoted", "converted_to_booking", "confirmed"):
+    # Trigger room unit / capacity allocation and customer notification when vendor accepts/confirms booking
+    if new_status in ("quoted", "converted_to_booking") or raw_status in ("quoted", "converted_to_booking", "confirmed"):
         try:
             service = BookingInquiryService(db)
             service._auto_provision_stay_bookings(inq)

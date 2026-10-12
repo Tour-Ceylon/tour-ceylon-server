@@ -104,16 +104,103 @@ async def get_bookings_by_user(
     return bookings
 
 
-@router.get("/listing/{listing_id}", response_model=List[BookingResponse])
+@router.get("/listing/{listing_id}")
 async def get_bookings_by_listing(
     listing_id: UUID,
     db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
-    """Get all bookings for a specific listing"""
-    
-    bookings = booking_repo.get_by_listing_id(listing_id)
-    return bookings
+    """Get all bookings and inquiries for a specific listing"""
+    results = []
+
+    # 1. Query relational bookings table
+    try:
+        bookings = booking_repo.get_by_listing_id(listing_id)
+        for b in bookings:
+            matching_items = [it for it in (b.booking_items or []) if it.listing_id == listing_id]
+            first_item = matching_items[0] if matching_items else None
+            title = (first_item.item_metadata or {}).get("title", "Reserved Item") if first_item else "Reserved Item"
+            slot = (first_item.item_metadata or {}).get("time_slot", "Morning Drive") if first_item else "Morning Drive"
+            passengers = int((first_item.item_metadata or {}).get("guests", 1)) if first_item else 1
+            travel_date = first_item.check_in.strftime("%Y-%m-%d") if (first_item and first_item.check_in) else ""
+            st_val = b.status.value.upper() if hasattr(b.status, "value") else str(b.status).upper()
+
+            results.append({
+                "id": str(b.id),
+                "booking_id": str(b.id),
+                "guestName": f"Customer {str(b.user_id)[:8]}",
+                "guest_name": f"Customer {str(b.user_id)[:8]}",
+                "email": "",
+                "package": title,
+                "date": travel_date,
+                "travel_date": travel_date,
+                "slot": slot,
+                "passengers": passengers,
+                "price": f"${float(b.total_amount):.2f} {b.currency.value if hasattr(b.currency, 'value') else b.currency}",
+                "total_amount": float(b.total_amount),
+                "paymentMethod": "Card / Online",
+                "payment_method": "Card / Online",
+                "status": st_val,
+            })
+    except Exception:
+        pass
+
+    # 2. Query booking_inquiries table (where client store checkouts are recorded)
+    try:
+        from app.models.bookingInquiry import BookingInquiry
+        inquiries = db.query(BookingInquiry).order_by(BookingInquiry.created_at.desc()).all()
+        target_str = str(listing_id).lower()
+
+        for inq in inquiries:
+            cart_items = inq.cart_items or []
+            matching_cart = []
+            for item in cart_items:
+                lid = str(item.get("listing_id") or item.get("listingId") or "").lower()
+                if lid == target_str:
+                    matching_cart.append(item)
+
+            if not matching_cart:
+                continue
+
+            first_item = matching_cart[0]
+            travel_date = first_item.get("travel_date_raw") or first_item.get("travel_date") or ""
+            if travel_date and "T" in str(travel_date):
+                travel_date = str(travel_date).split("T")[0]
+
+            st_raw = getattr(inq.status, "value", str(inq.status)).upper()
+            if st_raw in ("QUOTED", "CONVERTED_TO_BOOKING", "CONFIRMED"):
+                ui_status = "CONFIRMED"
+            elif st_raw in ("CANCELLED", "REJECTED"):
+                ui_status = "REJECTED"
+            else:
+                ui_status = "PENDING"
+
+            payment_pref = "Credit / Debit Card" if "Credit" in str(inq.special_requests or "") else "Pay on Arrival"
+
+            curr_str = inq.currency.value if hasattr(inq.currency, "value") else str(inq.currency or "USD")
+            results.append({
+                "id": inq.reference or str(inq.id),
+                "booking_id": inq.reference or str(inq.id),
+                "raw_id": str(inq.id),
+                "guestName": f"{inq.first_name or ''} {inq.last_name or ''}".strip() or "Guest",
+                "guest_name": f"{inq.first_name or ''} {inq.last_name or ''}".strip() or "Guest",
+                "email": inq.email or "",
+                "phone": inq.phone or "",
+                "package": first_item.get("title") or "Safari Game Drive",
+                "date": travel_date,
+                "travel_date": travel_date,
+                "slot": first_item.get("time_slot") or "Morning Drive",
+                "passengers": inq.number_of_travelers or 1,
+                "price": f"${float(inq.total or inq.subtotal or 0):.2f} {curr_str}",
+                "total_amount": float(inq.total or inq.subtotal or 0),
+                "paymentMethod": payment_pref,
+                "payment_method": payment_pref,
+                "status": ui_status,
+            })
+    except Exception:
+        pass
+
+    return results
 
 
 @router.get("/", response_model=BookingListResponse)
