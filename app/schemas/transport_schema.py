@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, Field
-from typing import List, Optional
+from typing import List, Literal, Optional
 from datetime import date, time
 from decimal import Decimal
 from uuid import UUID
@@ -183,7 +183,7 @@ class TransportBookingDetailResponse(BaseModel):
         from_attributes = True
 
 class TransportBookingStatusUpdate(BaseModel):
-    booking_status: str # pending, confirmed, completed, cancelled
+    booking_status: Literal["pending", "confirmed", "completed", "cancelled"]
 
 class TransportBookingNotesUpdate(BaseModel):
     internal_notes: str

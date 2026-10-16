@@ -96,6 +96,15 @@ def update_trip_status(
     return service.update_trip_status(current_user.id, booking_id, target_status=payload.status)
 
 
+@router.get("/declines", response_model=List[DriverTripDeclineRecordResponse])
+def list_my_declines(
+    current_user: User = Depends(get_current_user),
+    service: DriverTripService = Depends(get_driver_trip_service),
+):
+    """Trips this driver declined. A declined trip returns to the dispatch queue, so it no longer appears in their trip lists."""
+    return service.get_declines(current_user.id)
+
+
 @router.get("/earnings", response_model=DriverEarningsResponse)
 def get_my_earnings(
     period: str = Query("today", description="Earnings period: today, week, or month"),

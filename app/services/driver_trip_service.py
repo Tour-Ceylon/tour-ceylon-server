@@ -204,6 +204,26 @@ class DriverTripService:
             created_at=decline_record.created_at,
         )
 
+    def get_declines(self, user_id: UUID) -> List[DriverTripDeclineRecordResponse]:
+        driver = self._resolve_driver(user_id)
+        records = self.repo.get_driver_declines(driver.id)
+        return [
+            DriverTripDeclineRecordResponse(
+                id=record.id,
+                transport_booking_id=record.transport_booking_id,
+                booking_reference=record.transport_booking.booking_reference if record.transport_booking else None,
+                pickup_location=record.transport_booking.pickup_location if record.transport_booking else None,
+                destination_location=record.transport_booking.destination_location if record.transport_booking else None,
+                travel_date=record.transport_booking.travel_date if record.transport_booking else None,
+                total_price=record.transport_booking.total_price if record.transport_booking else None,
+                currency=record.transport_booking.currency if record.transport_booking else None,
+                reason=record.reason,
+                note=record.note,
+                created_at=record.created_at,
+            )
+            for record in records
+        ]
+
     def update_trip_status(
         self,
         user_id: UUID,
