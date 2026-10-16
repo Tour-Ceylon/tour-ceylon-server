@@ -124,6 +124,63 @@ class DriverLuggageCapacity(Base, TimestampMixin):
     luggage_size_type = relationship("LuggageSizeType", back_populates="driver_capacities")
 
 
+class DriverProfileChangeRequest(Base, UUIDMixin, TimestampMixin):
+    """A driver's proposed profile update, held until an admin approves or rejects it."""
+
+    __tablename__ = "driver_profile_change_requests"
+
+    driver_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("drivers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # pending | approved | rejected | withdrawn
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    # Only the fields that differ from the saved profile, e.g. {"bank_name": "...", "languages_spoken": [...]}
+    proposed = Column(JSONB, nullable=False, default=dict)
+    rejection_reason = Column(Text, nullable=True)
+    reviewed_by_user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+
+    driver = relationship("Driver")
+
+
+class TransportBookingDriverNote(Base, UUIDMixin, TimestampMixin):
+    """A note an admin writes for the driver assigned to a booking (one editable note per booking)."""
+
+    __tablename__ = "transport_booking_driver_notes"
+
+    booking_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("transport_bookings.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+    note = Column(Text, nullable=False)
+    updated_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+
+class DriverAvatarSubmission(Base, UUIDMixin, TimestampMixin):
+    """A profile photo a driver uploaded; shown only once an admin approves it."""
+
+    __tablename__ = "driver_avatar_submissions"
+
+    driver_id = Column(UUID(as_uuid=True), ForeignKey("drivers.id", ondelete="CASCADE"), nullable=False, index=True)
+    image_url = Column(Text, nullable=False)
+    cloudinary_public_id = Column(String(255), nullable=True)
+    # pending | approved | rejected | withdrawn
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    rejection_reason = Column(Text, nullable=True)
+    reviewed_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class TripDeclineReason(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "trip_decline_reasons"
 

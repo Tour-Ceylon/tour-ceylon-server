@@ -67,6 +67,9 @@ class DriverTripSummaryResponse(BaseModel):
     created_at: Optional[datetime] = None
     customer_name: str
     customer_phone: str
+    # A note from the admin team for this driver (separate from the customer's own request).
+    dispatch_note: Optional[str] = None
+    dispatch_note_updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -102,6 +105,8 @@ class DriverTripDetailResponse(BaseModel):
     created_at: Optional[datetime] = None
     customer: DriverTripCustomerInfo
     vehicle_category_name: Optional[str] = None
+    dispatch_note: Optional[str] = None
+    dispatch_note_updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
