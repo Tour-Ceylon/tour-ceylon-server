@@ -183,6 +183,16 @@ class DriverService:
                 detail="A vehicle with this plate number is already registered.",
             )
 
+        # Luggage sizes must exist; otherwise the insert fails later with an opaque 500.
+        requested_luggage_ids = {item.luggage_size_type_id for item in data.luggage_capacities}
+        if requested_luggage_ids:
+            known_luggage_ids = {row.id for row in self.repo.get_luggage_size_types()}
+            if requested_luggage_ids - known_luggage_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="One of the luggage sizes is not recognised. Please reload the page and try again.",
+                )
+
         # Create driver profile
         driver = self.repo.create_driver(user=user, data=data)
         return self._to_driver_response(driver)

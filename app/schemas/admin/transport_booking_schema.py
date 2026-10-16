@@ -29,6 +29,17 @@ class AdminAssignedDriverInfo(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AdminDeclineRecord(BaseModel):
+    id: UUID
+    driver_id: UUID
+    driver_name: Optional[str] = None
+    reason: str
+    note: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class AdminTransportBookingDetailResponse(BaseModel):
     id: UUID
     booking_reference: str
@@ -78,6 +89,8 @@ class AdminTransportBookingDetailResponse(BaseModel):
     # Linked Objects
     vehicle_category: Optional[VehicleCategoryResponse] = None
     driver: Optional[AdminAssignedDriverInfo] = None
+    # Drivers who declined this booking earlier (it returns to the queue as unassigned).
+    decline_history: List[AdminDeclineRecord] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -92,3 +105,7 @@ class AdminTransportBookingListResponse(BaseModel):
     assigned_count: int = 0
     in_progress_count: int = 0
     completed_count: int = 0
+    pending_count: int = 0
+    cancelled_count: int = 0
+    paid_revenue_usd: Decimal = Decimal("0")
+    average_fare_usd: Decimal = Decimal("0")

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 from uuid import UUID
 
+from app.api.v1.admin.drivers import require_driver_admin
 from app.config.database import get_db
 from app.services.transport_service import TransportService
 from app.schemas.transport_schema import (
@@ -14,7 +15,13 @@ from app.schemas.transport_schema import (
     TransportBookingNotesUpdate
 )
 
-router = APIRouter(prefix="/transport", tags=["admin-transport"])
+# Every route here exposes customer data or changes catalogue/booking state, so the whole
+# router is admin-only. (It previously had no authentication.)
+router = APIRouter(
+    prefix="/transport",
+    tags=["admin-transport"],
+    dependencies=[Depends(require_driver_admin)],
+)
 
 def get_transport_service(db: Session = Depends(get_db)) -> TransportService:
     return TransportService(db)

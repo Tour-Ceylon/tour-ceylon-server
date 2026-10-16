@@ -105,6 +105,7 @@ class TransportService:
             estimates.append(VehicleEstimate(
                 category_id=cat.id,
                 category_name=cat.name,
+                category_slug=cat.slug,
                 image_url=cat.image_url,
                 passenger_capacity=cat.passenger_capacity,
                 luggage_capacity=cat.luggage_capacity,
