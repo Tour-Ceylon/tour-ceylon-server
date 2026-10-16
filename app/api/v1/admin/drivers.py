@@ -7,7 +7,16 @@ from app.api.deps import get_current_user
 from app.config.database import get_db
 from app.models.enum import UserRole
 from app.models.user import User
-from app.schemas.driver_schema import DriverListResponse, DriverResponse, DriverStatusUpdate
+from app.schemas.driver_schema import (
+    DriverAvatarSubmissionResponse,
+    DriverListResponse,
+    DriverProfileChangeReject,
+    DriverProfileChangeResponse,
+    DriverResponse,
+    DriverStatusUpdate,
+)
+from app.services.driver_avatar_service import DriverAvatarService
+from app.services.driver_profile_change_service import DriverProfileChangeService
 from app.services.driver_service import DriverService
 
 router = APIRouter(prefix="/drivers", tags=["admin-drivers"])
@@ -57,6 +66,48 @@ def update_driver_status(
 ):
     """Update driver verification status (pending_review, approved, rejected, suspended)."""
     return service.update_driver_status(driver_id, payload.status.value)
+
+
+@router.post("/{driver_id}/avatar/approve", response_model=DriverAvatarSubmissionResponse)
+def approve_driver_avatar(
+    driver_id: UUID,
+    admin: User = Depends(require_driver_admin),
+    db: Session = Depends(get_db),
+):
+    """Approve the driver's pending profile photo; it becomes the photo shown across the portals."""
+    return DriverAvatarService(db).approve(driver_id, admin)
+
+
+@router.post("/{driver_id}/avatar/reject", response_model=DriverAvatarSubmissionResponse)
+def reject_driver_avatar(
+    driver_id: UUID,
+    payload: DriverProfileChangeReject,
+    admin: User = Depends(require_driver_admin),
+    db: Session = Depends(get_db),
+):
+    """Reject the pending photo with a reason the driver will see."""
+    return DriverAvatarService(db).reject(driver_id, admin, payload.reason)
+
+
+@router.post("/{driver_id}/profile-change/approve", response_model=DriverProfileChangeResponse)
+def approve_profile_change(
+    driver_id: UUID,
+    admin: User = Depends(require_driver_admin),
+    db: Session = Depends(get_db),
+):
+    """Approve the driver's pending profile update: its values are saved to the driver's record."""
+    return DriverProfileChangeService(db).approve(driver_id, admin)
+
+
+@router.post("/{driver_id}/profile-change/reject", response_model=DriverProfileChangeResponse)
+def reject_profile_change(
+    driver_id: UUID,
+    payload: DriverProfileChangeReject,
+    admin: User = Depends(require_driver_admin),
+    db: Session = Depends(get_db),
+):
+    """Reject the driver's pending profile update with a reason the driver will see."""
+    return DriverProfileChangeService(db).reject(driver_id, admin, payload.reason)
 
 
 @router.post("/{driver_id}/approve", response_model=DriverResponse)
