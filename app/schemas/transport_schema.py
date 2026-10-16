@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional
 from datetime import date, time
 from decimal import Decimal
@@ -71,6 +71,7 @@ class TransportLocationSuggestion(BaseModel):
 class VehicleEstimate(BaseModel):
     category_id: UUID
     category_name: str
+    category_slug: Optional[str] = None
     image_url: Optional[str] = None
     passenger_capacity: int
     luggage_capacity: int
@@ -95,9 +96,9 @@ class TransportBookingCreate(BaseModel):
     vehicle_category_id: UUID
     
     # Customer Details
-    customer_name: str
+    customer_name: str = Field(..., min_length=1, max_length=200)
     customer_email: EmailStr
-    customer_phone: str
+    customer_phone: str = Field(..., min_length=5, max_length=40)
     customer_country: Optional[str] = None
 
     # Route Details
@@ -113,9 +114,9 @@ class TransportBookingCreate(BaseModel):
     # Travel Details
     travel_date: date
     pickup_time: time
-    passengers_count: int
-    luggage_count: int
-    special_requests: Optional[str] = None
+    passengers_count: int = Field(..., ge=1, le=50)
+    luggage_count: int = Field(..., ge=0, le=50)
+    special_requests: Optional[str] = Field(None, max_length=1000)
 
     # Pricing (Sent from frontend based on estimate)
     base_fare: Decimal
