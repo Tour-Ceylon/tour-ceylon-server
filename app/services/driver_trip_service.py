@@ -9,6 +9,7 @@ from app.models.driver import Driver
 from app.models.enum import AssignmentStatus, DriverStatus
 from app.models.transportBooking import TransportBooking
 from app.repositories.driver_trip_repository import DriverTripRepository
+from app.services.driver_note_service import DriverNoteService
 from app.schemas.driver_trip_schema import (
     DriverAvailabilityResponse,
     DriverDailyEarningItem,
@@ -62,8 +63,12 @@ class DriverTripService:
             last_online_at=updated.last_online_at,
         )
 
-    def _format_summary(self, booking: TransportBooking) -> DriverTripSummaryResponse:
+    def _format_summary(self, booking: TransportBooking, notes: Optional[dict] = None) -> DriverTripSummaryResponse:
+        note = notes.get(booking.id) if notes is not None else DriverNoteService(self.db).for_booking(booking.id)
+        note_text, note_at = DriverNoteService.parts(note)
         return DriverTripSummaryResponse(
+            dispatch_note=note_text,
+            dispatch_note_updated_at=note_at,
             id=booking.id,
             booking_reference=booking.booking_reference,
             travel_date=booking.travel_date,
@@ -88,7 +93,10 @@ class DriverTripService:
         )
 
     def _format_detail(self, booking: TransportBooking) -> DriverTripDetailResponse:
+        note_text, note_at = DriverNoteService.parts(DriverNoteService(self.db).for_booking(booking.id))
         return DriverTripDetailResponse(
+            dispatch_note=note_text,
+            dispatch_note_updated_at=note_at,
             id=booking.id,
             booking_reference=booking.booking_reference,
             travel_date=booking.travel_date,
@@ -128,7 +136,8 @@ class DriverTripService:
     def get_trips(self, user_id: UUID, status_bucket: str = "assigned") -> List[DriverTripSummaryResponse]:
         driver = self._resolve_driver(user_id)
         trips = self.repo.get_driver_trips(driver.id, status_bucket)
-        return [self._format_summary(t) for t in trips]
+        notes = DriverNoteService(self.db).for_bookings([trip.id for trip in trips])
+        return [self._format_summary(trip, notes) for trip in trips]
 
     def get_trip_detail(self, user_id: UUID, booking_id: UUID) -> DriverTripDetailResponse:
         driver = self._resolve_driver(user_id)

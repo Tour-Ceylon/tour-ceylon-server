@@ -4,7 +4,7 @@ from typing import Optional
 from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, object_session
 
 from app.api.deps import get_current_user
 from app.api.v1.admin.drivers import require_driver_admin
@@ -15,10 +15,12 @@ from app.models.driver import Driver, TripDeclineReason
 from app.models.enum import AssignmentStatus, DriverStatus
 from app.models.transportBooking import TransportBooking
 from app.models.user import User
+from app.services.driver_note_service import DriverNoteService
 from app.schemas.admin.transport_booking_schema import (
     AdminAssignDriverRequest,
     AdminAssignedDriverInfo,
     AdminDeclineRecord,
+    AdminDriverNoteUpdate,
     AdminTransportBookingDetailResponse,
     AdminTransportBookingListResponse,
 )
@@ -50,7 +52,15 @@ def _send_customer_driver_assigned_task(booking: TransportBooking, driver: Drive
         logger.error("Error dispatching customer driver assigned email for %s: %s", booking.booking_reference, str(e))
 
 
-def _to_booking_response(booking: TransportBooking) -> AdminTransportBookingDetailResponse:
+_LOOKUP = object()
+
+
+def _to_booking_response(booking: TransportBooking, driver_note=_LOOKUP) -> AdminTransportBookingDetailResponse:
+    if driver_note is _LOOKUP:
+        session = object_session(booking)
+        driver_note = DriverNoteService(session).for_booking(booking.id) if session is not None else None
+    driver_note_text, driver_note_at = DriverNoteService.parts(driver_note)
+
     driver_info = None
     if booking.driver:
         full_name = None
@@ -130,6 +140,8 @@ def _to_booking_response(booking: TransportBooking) -> AdminTransportBookingDeta
         vehicle_category=booking.vehicle_category,
         driver=driver_info,
         decline_history=decline_history,
+        driver_note=driver_note_text,
+        driver_note_updated_at=driver_note_at,
     )
 
 
@@ -217,8 +229,10 @@ def list_admin_transport_bookings(
         TransportBooking.booking_status != "cancelled",
     ).scalar() or 0
 
+    notes_by_booking = DriverNoteService(db).for_bookings([b.id for b in bookings])
+
     return AdminTransportBookingListResponse(
-        bookings=[_to_booking_response(b) for b in bookings],
+        bookings=[_to_booking_response(b, notes_by_booking.get(b.id)) for b in bookings],
         total=total,
         page=page,
         per_page=per_page,
@@ -259,6 +273,32 @@ def get_admin_transport_booking(
             detail="Transport booking not found",
         )
     return _to_booking_response(booking)
+
+
+@router.put("/{booking_id}/driver-note", response_model=AdminTransportBookingDetailResponse)
+def set_driver_note(
+    booking_id: UUID,
+    payload: AdminDriverNoteUpdate,
+    admin: User = Depends(require_driver_admin),
+    db: Session = Depends(get_db),
+):
+    """Write (or, with an empty note, remove) the note passed to the driver assigned to this booking."""
+    booking = (
+        db.query(TransportBooking)
+        .options(
+            joinedload(TransportBooking.vehicle_category),
+            joinedload(TransportBooking.driver).joinedload(Driver.user),
+            joinedload(TransportBooking.decline_reasons)
+            .joinedload(TripDeclineReason.driver)
+            .joinedload(Driver.user),
+        )
+        .filter(TransportBooking.id == booking_id)
+        .first()
+    )
+    if not booking:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transport booking not found")
+    saved = DriverNoteService(db).set_note(booking_id, admin, payload.note)
+    return _to_booking_response(booking, saved)
 
 
 @router.patch("/{booking_id}/assign", response_model=AdminTransportBookingDetailResponse)

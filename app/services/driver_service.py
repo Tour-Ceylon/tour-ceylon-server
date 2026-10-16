@@ -9,8 +9,13 @@ from app.models.enum import UserRole, AssignmentStatus
 from app.models.transportBooking import TransportBooking
 from app.models.user import User
 from app.repositories.driver_repository import DriverRepository
+from app.services.driver_avatar_service import DriverAvatarService
+from app.services.driver_profile_change_service import DriverProfileChangeService
 from app.schemas.driver_schema import (
+    DriverAvatarSubmissionResponse,
     DriverListResponse,
+    DriverProfileChangeResponse,
+    DriverProfileChangeSubmit,
     DriverLuggageCapacityResponseItem,
     DriverProfileUpdate,
     DriverResponse,
@@ -80,6 +85,11 @@ class DriverService:
         except Exception:
             pass
 
+        latest_change = DriverProfileChangeService(self.db).latest_for_driver(driver.id)
+        avatar_service = DriverAvatarService(self.db)
+        latest_avatar = avatar_service.latest_for_driver(driver.id)
+        avatar_url = avatar_service.approved_url_for_driver(driver.id)
+
         return DriverResponse(
             id=driver.id,
             user_id=driver.user_id,
@@ -115,6 +125,9 @@ class DriverService:
             created_at=driver.created_at,
             updated_at=driver.updated_at,
             luggage_capacities=capacities,
+            latest_profile_change=DriverProfileChangeResponse.model_validate(latest_change) if latest_change else None,
+            avatar_url=avatar_url,
+            latest_avatar_submission=DriverAvatarSubmissionResponse.model_validate(latest_avatar) if latest_avatar else None,
         )
 
     def get_luggage_size_types(self) -> List[LuggageSizeTypeResponse]:
@@ -222,8 +235,10 @@ class DriverService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Driver profile not found.",
             )
-        updated = self.repo.update_driver_profile(driver.id, data)
-        return self._to_driver_response(updated)
+        # Profile details are never written straight to the driver's record: they are sent for admin review.
+        proposal = DriverProfileChangeSubmit.model_validate(data.model_dump(exclude_unset=True))
+        DriverProfileChangeService(self.db).submit(user_id, proposal)
+        return self._to_driver_response(self.repo.get_driver_by_user_id(user_id))
 
     def update_driver_status(self, driver_id: UUID, status: str) -> DriverResponse:
         driver = self.repo.update_driver_status(driver_id, status)

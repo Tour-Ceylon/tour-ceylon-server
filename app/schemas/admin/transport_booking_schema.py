@@ -29,6 +29,12 @@ class AdminAssignedDriverInfo(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AdminDriverNoteUpdate(BaseModel):
+    """An empty note removes it."""
+
+    note: str = Field("", max_length=1000)
+
+
 class AdminDeclineRecord(BaseModel):
     id: UUID
     driver_id: UUID
@@ -91,6 +97,9 @@ class AdminTransportBookingDetailResponse(BaseModel):
     driver: Optional[AdminAssignedDriverInfo] = None
     # Drivers who declined this booking earlier (it returns to the queue as unassigned).
     decline_history: List[AdminDeclineRecord] = []
+    # Note the admin team wrote for the assigned driver (the driver sees it; the customer does not).
+    driver_note: Optional[str] = None
+    driver_note_updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
