@@ -11,13 +11,14 @@ from app.api.v1.admin.drivers import require_driver_admin
 from app.config.database import get_db
 from app.core.logging import logger
 from app.integrations.email_provider import email_provider
-from app.models.driver import Driver
+from app.models.driver import Driver, TripDeclineReason
 from app.models.enum import AssignmentStatus, DriverStatus
 from app.models.transportBooking import TransportBooking
 from app.models.user import User
 from app.schemas.admin.transport_booking_schema import (
     AdminAssignDriverRequest,
     AdminAssignedDriverInfo,
+    AdminDeclineRecord,
     AdminTransportBookingDetailResponse,
     AdminTransportBookingListResponse,
 )
@@ -77,6 +78,22 @@ def _to_booking_response(booking: TransportBooking) -> AdminTransportBookingDeta
             rating=float(booking.driver.rating) if booking.driver.rating is not None else None,
         )
 
+    decline_history = [
+        AdminDeclineRecord(
+            id=record.id,
+            driver_id=record.driver_id,
+            driver_name=record.driver.user.full_name if record.driver and record.driver.user else None,
+            reason=record.reason,
+            note=record.note,
+            created_at=record.created_at,
+        )
+        for record in sorted(
+            booking.decline_reasons or [],
+            key=lambda r: r.created_at or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
+    ]
+
     return AdminTransportBookingDetailResponse(
         id=booking.id,
         booking_reference=booking.booking_reference,
@@ -112,6 +129,7 @@ def _to_booking_response(booking: TransportBooking) -> AdminTransportBookingDeta
         internal_notes=booking.internal_notes,
         vehicle_category=booking.vehicle_category,
         driver=driver_info,
+        decline_history=decline_history,
     )
 
 
@@ -131,6 +149,9 @@ def list_admin_transport_bookings(
         .options(
             joinedload(TransportBooking.vehicle_category),
             joinedload(TransportBooking.driver).joinedload(Driver.user),
+            joinedload(TransportBooking.decline_reasons)
+            .joinedload(TripDeclineReason.driver)
+            .joinedload(Driver.user),
         )
     )
 
@@ -178,6 +199,24 @@ def list_admin_transport_bookings(
         TransportBooking.assignment_status == AssignmentStatus.COMPLETED.value
     ).scalar() or 0
 
+    pending_count = db.query(func.count(TransportBooking.id)).filter(
+        TransportBooking.booking_status == "pending"
+    ).scalar() or 0
+
+    cancelled_count = db.query(func.count(TransportBooking.id)).filter(
+        TransportBooking.booking_status == "cancelled"
+    ).scalar() or 0
+
+    paid_revenue_usd = db.query(func.coalesce(func.sum(TransportBooking.total_price), 0)).filter(
+        TransportBooking.payment_status == "paid",
+        TransportBooking.currency == "USD",
+    ).scalar() or 0
+
+    average_fare_usd = db.query(func.coalesce(func.avg(TransportBooking.total_price), 0)).filter(
+        TransportBooking.currency == "USD",
+        TransportBooking.booking_status != "cancelled",
+    ).scalar() or 0
+
     return AdminTransportBookingListResponse(
         bookings=[_to_booking_response(b) for b in bookings],
         total=total,
@@ -188,6 +227,10 @@ def list_admin_transport_bookings(
         assigned_count=assigned_count,
         in_progress_count=in_progress_count,
         completed_count=completed_count,
+        pending_count=pending_count,
+        cancelled_count=cancelled_count,
+        paid_revenue_usd=paid_revenue_usd,
+        average_fare_usd=round(average_fare_usd, 2),
     )
 
 
@@ -203,6 +246,9 @@ def get_admin_transport_booking(
         .options(
             joinedload(TransportBooking.vehicle_category),
             joinedload(TransportBooking.driver).joinedload(Driver.user),
+            joinedload(TransportBooking.decline_reasons)
+            .joinedload(TripDeclineReason.driver)
+            .joinedload(Driver.user),
         )
         .filter(TransportBooking.id == booking_id)
         .first()
@@ -229,6 +275,9 @@ def assign_driver_to_booking(
         .options(
             joinedload(TransportBooking.vehicle_category),
             joinedload(TransportBooking.driver).joinedload(Driver.user),
+            joinedload(TransportBooking.decline_reasons)
+            .joinedload(TripDeclineReason.driver)
+            .joinedload(Driver.user),
         )
         .filter(TransportBooking.id == booking_id)
         .first()

@@ -1,3 +1,6 @@
+from datetime import date
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List
@@ -102,6 +105,35 @@ async def create_transport_booking(
     3. Sends a confirmation email to the customer (background task)
     4. Returns the booking reference and status
     """
+    # The client sends the quoted prices, so check what we can verify here and
+    # return a specific 4xx instead of letting it fall into the generic 500 below.
+    category = transport_service.get_category(booking_data.vehicle_category_id)
+    if not category or not category.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This vehicle is no longer available. Please choose another vehicle."
+        )
+    if booking_data.passengers_count < 1 or booking_data.passengers_count > category.passenger_capacity:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{category.name} seats up to {category.passenger_capacity} passengers."
+        )
+    if booking_data.luggage_count < 0 or booking_data.luggage_count > category.luggage_capacity:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{category.name} carries up to {category.luggage_capacity} bags."
+        )
+    if booking_data.travel_date < date.today():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The pickup date has already passed. Please choose a future date."
+        )
+    if abs((booking_data.route_price + booking_data.extra_charges) - booking_data.total_price) > Decimal("0.01"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The fare no longer adds up. Please search again to refresh the price."
+        )
+
     try:
         booking = transport_service.create_booking(booking_data)
 
