@@ -6,9 +6,9 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session, joinedload
 
-from app.api.deps import get_db
+from app.api.deps import get_db, require_role
 from app.core.logging import logger
-from app.models.enum import InquiryStatus
+from app.models.enum import InquiryStatus, UserRole
 from app.models.transportBooking import TransportBooking
 from app.schemas.booking_inquiry_schema import (
     BookingInquiryCreate,
@@ -290,9 +290,10 @@ class _StatusUpdateBody(BaseModel):
 def update_inquiry_status(
     inquiry_id: UUID,
     body: _StatusUpdateBody,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _admin=Depends(require_role([UserRole.ADMIN])),
 ):
-    """Update booking inquiry status"""
+    """Update booking inquiry status (admin only; vendors use /vendor/booking-inquiries)"""
     try:
         service = get_booking_inquiry_service(db)
         inquiry = service.update_inquiry_status(inquiry_id, body.status)

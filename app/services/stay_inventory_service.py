@@ -104,6 +104,12 @@ class StayInventoryService:
         ]
         return StayInventoryResponse(propertyId=property_record.id, roomTypes=room_types, roomUnits=room_units)
 
+    def _upload_room_images(self, property_record, images: list[dict] | None) -> list[dict]:
+        """Uploads any data-URL photos to the image store; already-hosted URLs pass through unchanged."""
+        from app.repositories.stay_repo import StayRepository
+
+        return StayRepository(self.db)._normalize_media_payload(images or [], vendor_id=property_record.vendor_id)
+
     def create_room_type(self, property_id: UUID, payload: StayRoomTypeCreate) -> StayRoomType:
         property_record = self._require_property(property_id)
         room_type = StayRoomType(
@@ -118,6 +124,7 @@ class StayInventoryService:
             bed_configuration=payload.bed_configuration,
             bathroom=payload.bathroom,
             discounts=payload.discounts,
+            images=self._upload_room_images(property_record, payload.images),
             metadata_json=payload.metadata,
         )
         self.db.add(room_type)
@@ -130,6 +137,10 @@ class StayInventoryService:
         for field, value in payload.model_dump(by_alias=False, exclude_unset=True).items():
             if field == "max_guests" and value is not None:
                 value = str(value)
+            if field == "images":
+                if value is None:
+                    continue
+                value = self._upload_room_images(room_type.property, value)
             if field == "metadata":
                 field = "metadata_json"
             setattr(room_type, field, value)
@@ -537,9 +548,213 @@ class StayInventoryService:
             .all()
         )
         return StayBookingListResponse(
-            bookings=[StayBookingResponse.model_validate(booking) for booking in bookings],
+            bookings=[self.build_booking_response(booking) for booking in bookings],
             total=len(bookings),
         )
+
+    def _find_inquiry(self, stay_booking: StayBooking):
+        from app.models.bookingInquiry import BookingInquiry
+
+        reference = (stay_booking.metadata_json or {}).get("inquiry_reference")
+        if not reference and stay_booking.booking is not None:
+            reference = stay_booking.booking.booking_reference
+        if not reference:
+            return None
+        return self.db.query(BookingInquiry).filter(BookingInquiry.reference == reference).first()
+
+    @staticmethod
+    def _item_matches_property(item: dict, property_record: StayProperty) -> bool:
+        lid = str(item.get("listing_id") or item.get("listingId") or "")
+        return lid in {str(property_record.id), str(property_record.listing_id or "")}
+
+    def build_booking_response(self, stay_booking: StayBooking) -> StayBookingResponse:
+        """Stay booking plus request details (price, guests, room names, date history)."""
+        response = StayBookingResponse.model_validate(stay_booking)
+        metadata = stay_booking.metadata_json or {}
+        inquiry = self._find_inquiry(stay_booking)
+        parent = stay_booking.booking
+
+        response.reference = metadata.get("inquiry_reference") or (parent.booking_reference if parent else None)
+        if inquiry is not None:
+            property_record = stay_booking.property or self.get_property(stay_booking.property_id)
+            item_total = Decimal("0")
+            matched = False
+            for item in inquiry.cart_items or []:
+                if property_record is not None and self._item_matches_property(item, property_record):
+                    item_total += Decimal(str(item.get("price") or 0))
+                    matched = True
+            response.total_amount = item_total if matched else inquiry.total
+            response.currency = getattr(inquiry.currency, "value", str(inquiry.currency))
+            response.number_of_guests = inquiry.number_of_travelers
+            response.nationality = inquiry.nationality
+        elif parent is not None:
+            response.total_amount = parent.total_amount
+            response.currency = getattr(parent.currency, "value", str(parent.currency))
+
+        rooms_by_type: dict[UUID, dict] = {}
+        for room in stay_booking.rooms:
+            entry = rooms_by_type.setdefault(
+                room.room_type_id,
+                {
+                    "roomTypeName": room.room_type.name if room.room_type else "Room",
+                    "quantity": 0,
+                    "roomNumbers": [],
+                },
+            )
+            entry["quantity"] += 1
+            if room.room_unit is not None:
+                entry["roomNumbers"].append(room.room_unit.room_number)
+        response.room_summary = list(rooms_by_type.values())
+
+        original_in = metadata.get("original_check_in_date")
+        original_out = metadata.get("original_check_out_date")
+        response.original_check_in_date = date.fromisoformat(original_in) if original_in else None
+        response.original_check_out_date = date.fromisoformat(original_out) if original_out else None
+        response.date_changes = list(metadata.get("date_changes") or [])
+        return response
+
+    def reschedule_booking(
+        self,
+        stay_booking: StayBooking,
+        new_check_in: date,
+        new_check_out: date,
+        *,
+        actor: User,
+        note: str | None = None,
+    ) -> StayBooking:
+        """Move a stay booking to new dates, re-allocating room units if needed.
+
+        All-or-nothing: raises ValueError (and changes nothing) when any room cannot be
+        placed on the new dates.
+        """
+        from sqlalchemy.orm.attributes import flag_modified
+
+        if stay_booking.status == StayBookingStatus.CANCELLED:
+            raise ValueError("Cancelled bookings cannot be rescheduled")
+
+        old_check_in, old_check_out = stay_booking.check_in_date, stay_booking.check_out_date
+        if (old_check_in, old_check_out) == (new_check_in, new_check_out):
+            raise ValueError("New dates are the same as the current dates")
+
+        rooms = list(stay_booking.rooms)
+        used_unit_ids: set[UUID] = set()
+        assignments: list[tuple[StayBookingRoom, StayRoomUnit]] = []
+
+        def unit_is_free(unit: StayRoomUnit) -> bool:
+            if (unit.status or "").lower() in INACTIVE_UNIT_STATUSES:
+                return False
+            has_booking = (
+                self.db.query(StayBookingRoom.id)
+                .join(StayBooking, StayBookingRoom.stay_booking_id == StayBooking.id)
+                .join(Booking, StayBooking.booking_id == Booking.id)
+                .filter(
+                    StayBookingRoom.room_unit_id == unit.id,
+                    StayBookingRoom.stay_booking_id != stay_booking.id,
+                    StayBookingRoom.check_in_date < new_check_out,
+                    StayBookingRoom.check_out_date > new_check_in,
+                    StayBooking.status != StayBookingStatus.CANCELLED,
+                    Booking.status.in_(list(ACTIVE_PARENT_BOOKING_STATUSES)),
+                )
+                .first()
+                is not None
+            )
+            if has_booking:
+                return False
+            return (
+                self.db.query(StayRoomBlock.id)
+                .filter(
+                    StayRoomBlock.room_unit_id == unit.id,
+                    StayRoomBlock.status == StayRoomBlockStatus.ACTIVE,
+                    StayRoomBlock.start_date < new_check_out,
+                    StayRoomBlock.end_date > new_check_in,
+                )
+                .first()
+                is None
+            )
+
+        for room in rooms:
+            candidates = [room.room_unit] if room.room_unit is not None else []
+            candidates += (
+                self.db.query(StayRoomUnit)
+                .filter(
+                    StayRoomUnit.property_id == stay_booking.property_id,
+                    StayRoomUnit.room_type_id == room.room_type_id,
+                    StayRoomUnit.id != room.room_unit_id,
+                )
+                .all()
+            )
+            chosen = next((unit for unit in candidates if unit.id not in used_unit_ids and unit_is_free(unit)), None)
+            if chosen is None:
+                type_name = room.room_type.name if room.room_type else "the selected room type"
+                raise ValueError(
+                    f"No {type_name} available from {new_check_in} to {new_check_out}. Try different dates."
+                )
+            used_unit_ids.add(chosen.id)
+            assignments.append((room, chosen))
+
+        for room, unit in assignments:
+            room.room_unit_id = unit.id
+            room.check_in_date = new_check_in
+            room.check_out_date = new_check_out
+        stay_booking.check_in_date = new_check_in
+        stay_booking.check_out_date = new_check_out
+
+        actor_role = getattr(actor.role, "value", str(actor.role))
+        metadata = dict(stay_booking.metadata_json or {})
+        metadata.setdefault("original_check_in_date", old_check_in.isoformat())
+        metadata.setdefault("original_check_out_date", old_check_out.isoformat())
+        changes = list(metadata.get("date_changes") or [])
+        changes.append(
+            {
+                "from": {"checkIn": old_check_in.isoformat(), "checkOut": old_check_out.isoformat()},
+                "to": {"checkIn": new_check_in.isoformat(), "checkOut": new_check_out.isoformat()},
+                "changedBy": actor.full_name or actor.email,
+                "changedByRole": actor_role,
+                "changedAt": datetime.utcnow().isoformat() + "Z",
+                "note": note,
+            }
+        )
+        metadata["date_changes"] = changes
+        stay_booking.metadata_json = metadata
+        flag_modified(stay_booking, "metadata_json")
+
+        # Keep the inquiry in sync so the admin portal shows the new dates
+        inquiry = self._find_inquiry(stay_booking)
+        if inquiry is not None:
+            property_record = stay_booking.property or self.get_property(stay_booking.property_id)
+            new_items = []
+            for item in inquiry.cart_items or []:
+                item = dict(item)
+                if property_record is not None and self._item_matches_property(item, property_record):
+                    change = dict(item.get("date_change") or {})
+                    change.setdefault("original_check_in", old_check_in.isoformat())
+                    change.setdefault("original_check_out", old_check_out.isoformat())
+                    change.update(
+                        {
+                            "changed_by": actor.full_name or actor.email,
+                            "changed_by_role": actor_role,
+                            "changed_at": datetime.utcnow().isoformat() + "Z",
+                            "note": note,
+                        }
+                    )
+                    item["date_change"] = change
+                    item["travel_date"] = new_check_in.isoformat()
+                    item["travel_date_end"] = new_check_out.isoformat()
+                    item["travel_date_raw"] = f"{new_check_in.isoformat()} to {new_check_out.isoformat()}"
+                    for camel in ("travelDate", "travelDateEnd", "travelDateRaw"):
+                        item.pop(camel, None)
+                new_items.append(item)
+            inquiry.cart_items = new_items
+            flag_modified(inquiry, "cart_items")
+
+        self.db.commit()
+
+        room_type_ids = {room.room_type_id for room in rooms}
+        for start, end in ((old_check_in, old_check_out), (new_check_in, new_check_out)):
+            self.refresh_calendar(stay_booking.property_id, room_type_ids, start, end - timedelta(days=1))
+        self.db.commit()
+        self.db.refresh(stay_booking)
+        return stay_booking
 
     def list_property_blocks(
         self,

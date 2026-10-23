@@ -3,17 +3,20 @@ from datetime import date
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.config.database import get_db
 from app.integrations.cloudinary import CloudinaryIntegrationError
-from app.models.enum import UserRole
+from app.models.enum import StayBookingStatus, UserRole
 from app.models.user import User
 from app.repositories.stay_repo import StayRepository
 from app.schemas.stay_schema import (
+    StayBookingDatesUpdate,
     StayBookingListResponse,
+    StayBookingResponse,
     StayCalendarResponse,
     StayInventoryResponse,
     StayRoomBlockListResponse,
@@ -358,3 +361,108 @@ async def list_property_bookings(
         return service.list_property_bookings(property_record.id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+class StayBookingStatusPayload(BaseModel):
+    status: StayBookingStatus
+
+
+@router.patch("/{property_id}/bookings/{stay_booking_id}/status", response_model=StayBookingResponse, response_model_by_alias=True)
+async def update_property_booking_status(
+    property_id: UUID,
+    stay_booking_id: UUID,
+    payload: StayBookingStatusPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_stay_vendor),
+    repo: StayRepository = Depends(get_stay_repository),
+    service: StayInventoryService = Depends(get_stay_inventory_service),
+):
+    """Confirm / cancel a stay booking. Vendors only reach their own property; admins reach any."""
+    from app.models.booking import Booking
+    from app.models.bookingInquiry import BookingInquiry
+    from app.models.enum import BookingStatus
+    from app.models.stay import StayBooking
+    from app.services.booking_inquiry_service import BookingInquiryService
+
+    property_record = ensure_property_access(current_user, repo, property_id)
+    stay_booking = (
+        db.query(StayBooking)
+        .filter(StayBooking.id == stay_booking_id, StayBooking.property_id == property_record.id)
+        .first()
+    )
+    if stay_booking is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stay booking not found")
+
+    new_status = payload.status
+    inquiry = None
+    inquiry_ref = (stay_booking.metadata_json or {}).get("inquiry_reference")
+    if inquiry_ref:
+        inquiry = db.query(BookingInquiry).filter(BookingInquiry.reference == inquiry_ref).first()
+
+    if new_status == StayBookingStatus.CANCELLED:
+        if inquiry is not None:
+            inquiry.status = "cancelled"
+            db.commit()
+            BookingInquiryService(db)._release_stay_bookings(inquiry)
+        else:
+            stay_booking.status = StayBookingStatus.CANCELLED
+            parent = db.query(Booking).filter(Booking.id == stay_booking.booking_id).first()
+            if parent:
+                parent.status = BookingStatus.CANCELLED
+            db.commit()
+    else:
+        stay_booking.status = new_status
+        parent = db.query(Booking).filter(Booking.id == stay_booking.booking_id).first()
+        if parent:
+            parent.status = BookingStatus.CONFIRMED if new_status == StayBookingStatus.CONFIRMED else BookingStatus.PENDING
+        if inquiry is not None:
+            inquiry.status = "quoted" if new_status == StayBookingStatus.CONFIRMED else "pending_contact"
+        db.commit()
+
+        if new_status == StayBookingStatus.CONFIRMED and inquiry is not None:
+            try:
+                from app.integrations.email_provider import EmailProvider
+                detailed = BookingInquiryService(db).get_inquiry_by_id(inquiry.id)
+                if detailed:
+                    EmailProvider().send_vendor_booking_accepted_email(detailed)
+            except Exception as exc:
+                logger.error(f"Failed to send confirmation email for {inquiry_ref}: {exc}")
+
+    db.refresh(stay_booking)
+    return service.build_booking_response(stay_booking)
+
+
+@router.patch("/{property_id}/bookings/{stay_booking_id}/dates", response_model=StayBookingResponse, response_model_by_alias=True)
+async def update_property_booking_dates(
+    property_id: UUID,
+    stay_booking_id: UUID,
+    payload: StayBookingDatesUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_stay_vendor),
+    repo: StayRepository = Depends(get_stay_repository),
+    service: StayInventoryService = Depends(get_stay_inventory_service),
+):
+    """Change check-in / check-out of a booking (e.g. after negotiating with the guest)."""
+    from app.models.stay import StayBooking
+
+    property_record = ensure_property_access(current_user, repo, property_id)
+    stay_booking = (
+        db.query(StayBooking)
+        .filter(StayBooking.id == stay_booking_id, StayBooking.property_id == property_record.id)
+        .first()
+    )
+    if stay_booking is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stay booking not found")
+
+    try:
+        updated = service.reschedule_booking(
+            stay_booking,
+            payload.check_in_date,
+            payload.check_out_date,
+            actor=current_user,
+            note=payload.note,
+        )
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return service.build_booking_response(updated)

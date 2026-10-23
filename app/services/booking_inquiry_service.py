@@ -148,7 +148,7 @@ class BookingInquiryService:
             raw_st = status.value if hasattr(status, "value") else str(status)
             if raw_st in ("quoted", "converted_to_booking", "confirmed"):
                 try:
-                    self._auto_provision_stay_bookings(db_inquiry)
+                    self._auto_provision_stay_bookings(db_inquiry, confirm=True)
                 except Exception as auto_ex:
                     logger.error(f"Error auto-provisioning stay booking on status update: {auto_ex}")
             elif raw_st in ("cancelled", "rejected"):
@@ -333,10 +333,13 @@ class BookingInquiryService:
             vendor_role=top_vendor_role
         )
 
-    def _auto_provision_stay_bookings(self, db_inquiry: BookingInquiry) -> None:
+    def _auto_provision_stay_bookings(self, db_inquiry: BookingInquiry, confirm: bool = False) -> None:
         """
         Auto-allocate room units and create StayBooking + StayBookingRoom records
         when a client places a stay booking inquiry.
+
+        Rooms are reserved immediately, but the stay/parent booking stays PENDING
+        until an admin or vendor confirms the inquiry (confirm=True).
         """
         from app.models.stay import StayProperty, StayRoomType, StayRoomUnit, StayBooking, StayBookingRoom, StayRoomBlock
         from app.models.booking import Booking
@@ -484,7 +487,15 @@ class BookingInquiryService:
                         StayBooking.status != StayBookingStatus.CANCELLED
                     ).first()
                     if existing_sb:
+                        if confirm and existing_sb.status == StayBookingStatus.PENDING:
+                            existing_sb.status = StayBookingStatus.CONFIRMED
+                            if existing_sb.booking and existing_sb.booking.status == BookingStatus.PENDING:
+                                existing_sb.booking.status = BookingStatus.CONFIRMED
+                            self.db.commit()
                         continue
+
+                    target_booking_status = BookingStatus.CONFIRMED if confirm else BookingStatus.PENDING
+                    target_stay_status = StayBookingStatus.CONFIRMED if confirm else StayBookingStatus.PENDING
 
                     parent_booking = self.db.query(Booking).filter(
                         Booking.booking_reference == db_inquiry.reference
@@ -493,7 +504,7 @@ class BookingInquiryService:
                         parent_booking = Booking(
                             booking_reference=db_inquiry.reference,
                             user_id=system_user.id if system_user else None,
-                            status=BookingStatus.CONFIRMED,
+                            status=target_booking_status,
                             total_amount=Decimal(str(db_inquiry.total or 100)),
                             currency=CurrencyCode.USD,
                             payment_status=PaymentTransactionStatus.PENDING,
@@ -505,7 +516,7 @@ class BookingInquiryService:
                     stay_booking = StayBooking(
                         booking_id=parent_booking.id,
                         property_id=prop.id,
-                        status=StayBookingStatus.CONFIRMED,
+                        status=target_stay_status,
                         check_in_date=check_in,
                         check_out_date=check_out,
                         guest_name=f"{db_inquiry.first_name} {db_inquiry.last_name}",
