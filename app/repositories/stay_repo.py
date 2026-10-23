@@ -577,6 +577,7 @@ class StayRepository:
             room_units = room_type_data.pop("room_units", None)
             unit_prefix = room_type_data.pop("unit_prefix", None)
             floor = room_type_data.pop("floor", None)
+            images = room_type_data.pop("images", None)
             metadata = room_type_data.pop("metadata", {}) or {}
             for metadata_field in ("smoking", "guest_access"):
                 value = room_type_data.pop(metadata_field, None)
@@ -588,6 +589,12 @@ class StayRepository:
             room_type_data["name"] = base_name
             room_type_data["property_id"] = db_property.id
             room_type_data["metadata_json"] = metadata
+            # Only touch the stored photos when the request carried them (data URLs are uploaded here).
+            if images is not None:
+                room_type_data["images"] = self._normalize_media_payload(
+                    images,
+                    vendor_id=db_property.vendor_id,
+                )
 
             # Match existing room type by ID or Name
             raw_id = raw_room_type_data.get("id")

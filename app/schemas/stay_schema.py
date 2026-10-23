@@ -2,7 +2,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.enum import StayBookingStatus, StayRoomBlockStatus, StayRoomBlockType
 
@@ -42,6 +42,8 @@ class StayRoomTypeInput(BaseModel):
     bathroom: dict = Field(default_factory=dict)
     discounts: list[dict] = Field(default_factory=list)
     room_units: list[str] | None = Field(default=None, alias="roomUnits")
+    # None = leave the stored photos untouched (a form that does not send them must not wipe them).
+    images: list[dict] | None = None
     metadata: dict = Field(default_factory=dict)
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
@@ -107,7 +109,13 @@ class StayRoomTypeResponse(BaseModel):
     bed_configuration: dict = Field(alias="bedConfiguration")
     bathroom: dict
     discounts: list[dict]
+    images: list[dict] = Field(default_factory=list)
     room_units: list[StayRoomUnitResponse] = Field(default_factory=list, alias="roomUnits")
+
+    @field_validator("images", mode="before")
+    @classmethod
+    def _images_never_null(cls, value):
+        return value or []
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True, serialize_by_alias=True)
 
@@ -183,6 +191,7 @@ class StayRoomTypeCreate(BaseModel):
     bed_configuration: dict = Field(default_factory=dict, alias="bedConfiguration")
     bathroom: dict = Field(default_factory=dict)
     discounts: list[dict] = Field(default_factory=list)
+    images: list[dict] = Field(default_factory=list)
     metadata: dict = Field(default_factory=dict)
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
@@ -199,6 +208,7 @@ class StayRoomTypeUpdate(BaseModel):
     bed_configuration: dict | None = Field(default=None, alias="bedConfiguration")
     bathroom: dict | None = None
     discounts: list[dict] | None = None
+    images: list[dict] | None = None
     metadata: dict | None = None
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
@@ -383,7 +393,32 @@ class StayBookingResponse(BaseModel):
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
 
+    # Request details resolved from the originating inquiry / parent booking
+    reference: str | None = None
+    total_amount: Decimal | None = Field(default=None, alias="totalAmount")
+    currency: str | None = None
+    number_of_guests: int | None = Field(default=None, alias="numberOfGuests")
+    nationality: str | None = None
+    room_summary: list[dict] = Field(default_factory=list, alias="roomSummary")
+    original_check_in_date: date | None = Field(default=None, alias="originalCheckInDate")
+    original_check_out_date: date | None = Field(default=None, alias="originalCheckOutDate")
+    date_changes: list[dict] = Field(default_factory=list, alias="dateChanges")
+
     model_config = ConfigDict(from_attributes=True, populate_by_name=True, serialize_by_alias=True)
+
+
+class StayBookingDatesUpdate(BaseModel):
+    check_in_date: date = Field(alias="checkInDate")
+    check_out_date: date = Field(alias="checkOutDate")
+    note: str | None = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @model_validator(mode="after")
+    def validate_date_range(self):
+        if self.check_out_date <= self.check_in_date:
+            raise ValueError("checkOutDate must be after checkInDate")
+        return self
 
 
 class StayBookingListResponse(BaseModel):

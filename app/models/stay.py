@@ -132,6 +132,8 @@ class StayRoomType(Base, UUIDMixin, TimestampMixin):
     bed_configuration = Column(JSONB, nullable=False, default=dict)
     bathroom = Column(JSONB, nullable=False, default=dict)
     discounts = Column(JSONB, nullable=False, default=list)
+    # Room photos: [{"url", "alt", "sortOrder", "isPrimary", ...}]. Never NULL; the first entry is the card cover.
+    images = Column(JSONB, nullable=False, default=list, server_default="[]")
     metadata_json = Column("metadata", JSONB, nullable=False, default=dict)
 
     property = relationship("StayProperty", back_populates="room_types")
