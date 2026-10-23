@@ -158,6 +158,17 @@ def _decode_and_verify_clerk_token(token: str) -> dict:
             detail="Authentication token has expired",
         ) from exc
     except JWTError as exc:
+        try:
+            unverified = jwt.get_unverified_claims(token)
+            now_ts = datetime.now(timezone.utc).timestamp()
+            logger.warning(
+                "auth.token_time_claims nbf_minus_now=%.1fs iat_minus_now=%.1fs exp_minus_now=%.1fs",
+                (unverified.get("nbf") or 0) - now_ts,
+                (unverified.get("iat") or 0) - now_ts,
+                (unverified.get("exp") or 0) - now_ts,
+            )
+        except JWTError:
+            pass
         logger.warning(
             "auth.token_decode_failed issuer=%s audience=%s error=%s",
             issuer,

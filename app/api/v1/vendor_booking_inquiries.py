@@ -190,6 +190,24 @@ def update_vendor_inquiry_status(
     if not inq:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking inquiry not found")
 
+    # Admins can update any inquiry; vendors only inquiries that contain their own listings
+    if not is_admin_user(current_user):
+        v_listings = db.query(Listing).filter(Listing.vendor_id == current_user.id).all()
+        v_props = db.query(StayProperty).filter(StayProperty.vendor_id == current_user.id).all()
+        owned_ids = set(str(l.id) for l in v_listings)
+        owned_ids.update(str(p.id) for p in v_props)
+        owned_ids.update(str(p.listing_id) for p in v_props if p.listing_id)
+
+        owns_inquiry = any(
+            str(item.get("listing_id") or item.get("listingId") or "") in owned_ids
+            for item in (inq.cart_items or [])
+        )
+        if not owns_inquiry:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only update bookings for your own listings",
+            )
+
     raw_status = payload.status.lower()
     status_map = {
         "pending": "pending_contact",
@@ -213,7 +231,7 @@ def update_vendor_inquiry_status(
     if new_status in ("quoted", "converted_to_booking") or raw_status in ("quoted", "converted_to_booking", "confirmed"):
         try:
             service = BookingInquiryService(db)
-            service._auto_provision_stay_bookings(inq)
+            service._auto_provision_stay_bookings(inq, confirm=True)
             detailed = service.get_inquiry_by_id(inq.id)
             if detailed:
                 email_prov = EmailProvider()
