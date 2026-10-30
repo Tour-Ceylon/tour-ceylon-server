@@ -2,15 +2,21 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status
 
+from app.api.deps import require_role
 from app.api.errors import AdminAPIError
 from app.api.v1.admin.dependencies import get_admin_service, get_media_service
+from app.models.enum import UserRole
 from app.schemas.admin.packages import PackageCreate, PackageResponse, PackageUpdate
 from app.schemas.media_schema import MediaAltTextUpdateRequest, MediaAssetListResponse, MediaPrimaryUpdateRequest, MediaReorderRequest, MediaUploadResponse
 from app.services.admin.dashboard_service import AdminDashboardService
 from app.models.enum import MediaOwnerType
 from app.services.media_service import MediaService
 
-router = APIRouter(prefix="/packages", tags=["admin-packages"])
+router = APIRouter(
+    prefix="/packages",
+    tags=["admin-packages"],
+    dependencies=[Depends(require_role([UserRole.ADMIN]))],
+)
 
 
 @router.post("", response_model=PackageResponse, status_code=status.HTTP_201_CREATED)
