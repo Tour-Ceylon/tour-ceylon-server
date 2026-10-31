@@ -12,6 +12,7 @@ from sqlalchemy.pool import StaticPool
 
 os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
 
+from app.api.deps import get_current_user, get_current_user_id
 from app.api.v1 import bookings as booking_routes
 from app.api.v1 import listing as listing_routes
 from app.config.database import get_db
@@ -50,7 +51,13 @@ def db_session():
 
 
 @pytest.fixture
-def client(db_session):
+def auth_state():
+    """Holder for the user the overridden auth dependencies should return."""
+    return {"user": None}
+
+
+@pytest.fixture
+def client(db_session, auth_state):
     app = FastAPI()
     app.include_router(listing_routes.router, prefix="/listings", tags=["listings"])
     app.include_router(booking_routes.router, prefix="/bookings", tags=["bookings"])
@@ -61,12 +68,27 @@ def client(db_session):
         finally:
             pass
 
+    def override_get_current_user():
+        user = auth_state["user"]
+        if user is None:
+            pytest.fail(
+                "auth_state['user'] was not set - request the booking_seed "
+                "fixture before calling an authenticated bookings endpoint"
+            )
+        return user
+
     app.dependency_overrides[get_db] = override_get_db
+    # bookings endpoints now require a Clerk-authenticated user; bypass real
+    # token verification and inject the seeded user directly.
+    app.dependency_overrides[get_current_user] = override_get_current_user
+    app.dependency_overrides[get_current_user_id] = (
+        lambda: override_get_current_user().id
+    )
     return TestClient(app)
 
 
 @pytest.fixture
-def booking_seed(db_session):
+def booking_seed(db_session, auth_state):
     destination = Destination(
         name="Colombo",
         destination_type=DestinationType.CITY,
@@ -98,15 +120,19 @@ def booking_seed(db_session):
         is_default=True,
         is_active=True,
     )
+    # ADMIN rather than TOURIST: this one user acts both as the booking owner
+    # and as the caller for the admin-only /bookings/stats/* endpoints.
     user = User(
         email="traveler@example.com",
         full_name="Traveler",
         country="Sri Lanka",
-        role=UserRole.TOURIST,
+        role=UserRole.ADMIN,
         is_active=True,
     )
     db_session.add_all([variant, user])
     db_session.commit()
+
+    auth_state["user"] = user
 
     return {
         "destination": destination,
@@ -199,7 +225,7 @@ def test_create_booking_returns_nested_items_and_travelers(client, booking_seed)
         "/bookings/",
         json={
             "booking_reference": "BK-1001",
-            "user_id": str(booking_seed["user"].id),
+            # no user_id: the owner is derived from the authenticated token
             "status": "pending",
             "total_amount": "350.00",
             "currency": "LKR",
@@ -239,7 +265,7 @@ def test_booking_stats_uses_model_first_aggregate_field_names(client, booking_se
         "/bookings/",
         json={
             "booking_reference": "BK-1002",
-            "user_id": str(booking_seed["user"].id),
+            # no user_id: the owner is derived from the authenticated token
             "status": "confirmed",
             "total_amount": "500.00",
             "currency": "LKR",
