@@ -20,6 +20,8 @@ from app.api.v1 import (
     notifications,
     drivers,
     driver_trips,
+    payments,
+    transfers,
 )
 
 api_router = APIRouter()
@@ -138,3 +140,17 @@ api_router.include_router(
     driver_trips.router,
     tags=["driver-trips"]
 )
+
+api_router.include_router(
+    payments.router,
+    prefix="/payments",
+    tags=["payments"]
+)
+
+api_router.include_router(
+    transfers.router,
+    prefix="/transfers",
+    tags=["transfers"]
+)
+
+

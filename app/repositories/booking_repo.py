@@ -9,8 +9,17 @@ from sqlalchemy.orm import Session, joinedload
 from app.models.booking import Booking
 from app.models.bookingItem import BookingItem
 from app.models.bookingTraveler import BookingTraveler
-from app.models.enum import BookingStatus
+from app.models.bookingStatusHistory import BookingStatusHistory
+from app.models.enum import BookingStatus, ChangedByType
 from app.schemas.booking_schema import BookingCreate, BookingSearchParams, BookingUpdate
+
+ALLOWED_BOOKING_TRANSITIONS = {
+    BookingStatus.PENDING: {BookingStatus.CONFIRMED, BookingStatus.CANCELLED, BookingStatus.EXPIRED},
+    BookingStatus.CONFIRMED: {BookingStatus.COMPLETED, BookingStatus.CANCELLED},
+    BookingStatus.CANCELLED: set(),
+    BookingStatus.COMPLETED: set(),
+    BookingStatus.EXPIRED: set(),
+}
 
 
 class BookingRepository:
@@ -160,14 +169,39 @@ class BookingRepository:
         self.db.commit()
         return True
 
-    def update_status(self, booking_id: UUID, status: BookingStatus) -> Optional[Booking]:
+    def update_status(
+        self,
+        booking_id: UUID,
+        status: BookingStatus,
+        changed_by_type: ChangedByType = ChangedByType.ADMIN,
+        changed_by_user_id: Optional[UUID] = None,
+    ) -> Optional[Booking]:
         db_booking = self.get_by_id(booking_id)
         if not db_booking:
             return None
 
-        db_booking.status = status
-        self.db.commit()
-        self.db.refresh(db_booking)
+        old_status = db_booking.status
+        if old_status != status:
+            allowed = ALLOWED_BOOKING_TRANSITIONS.get(old_status, set())
+            if status not in allowed:
+                from fastapi import HTTPException
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Cannot transition booking status from {old_status.value} to {status.value}.",
+                )
+
+            db_booking.status = status
+            history = BookingStatusHistory(
+                booking_id=db_booking.id,
+                old_status=old_status,
+                new_status=status,
+                changed_by_type=changed_by_type,
+                changed_by_user_id=changed_by_user_id,
+                changed_at=datetime.utcnow(),
+            )
+            self.db.add(history)
+            self.db.commit()
+            self.db.refresh(db_booking)
         return self.get_by_id(db_booking.id)
 
     def get_by_status(self, status: BookingStatus) -> list[Booking]:

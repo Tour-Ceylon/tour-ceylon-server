@@ -23,6 +23,15 @@ from app.schemas.transport_schema import (
     TransportBookingResponse
 )
 
+ALLOWED_TRANSPORT_TRANSITIONS = {
+    "pending": {"confirmed", "cancelled"},
+    "confirmed": {"in_progress", "completed", "cancelled"},
+    "in_progress": {"completed", "cancelled"},
+    "completed": set(),
+    "cancelled": set(),
+}
+
+
 class TransportService:
     def __init__(self, db: Session):
         self.db = db
@@ -132,7 +141,28 @@ class TransportService:
     def create_booking(self, booking_data: TransportBookingCreate, user_id: Optional[str] = None) -> TransportBooking:
         # Generate unique booking reference
         reference = self._generate_reference()
-        
+
+        # Server-side authoritative pricing (SRV-PRC-03)
+        cat = self.get_category(booking_data.vehicle_category_id)
+        if cat:
+            dist = Decimal(str(booking_data.distance_km))
+            expected_route = cat.base_fare + (dist * cat.price_per_km)
+            if expected_route < cat.minimum_fare:
+                expected_route = cat.minimum_fare
+            base_fare = cat.base_fare
+            price_per_km = cat.price_per_km
+            route_price = expected_route
+            extra = Decimal(str(booking_data.extra_charges or 0))
+            total_price = route_price + extra
+            currency = cat.currency
+        else:
+            base_fare = booking_data.base_fare
+            price_per_km = booking_data.price_per_km
+            route_price = booking_data.route_price
+            extra = booking_data.extra_charges
+            total_price = booking_data.total_price
+            currency = booking_data.currency
+
         db_booking = TransportBooking(
             booking_reference=reference,
             user_id=user_id,
@@ -161,12 +191,12 @@ class TransportService:
             luggage_count=booking_data.luggage_count,
             special_requests=booking_data.special_requests,
             
-            base_fare=booking_data.base_fare,
-            price_per_km=booking_data.price_per_km,
-            route_price=booking_data.route_price,
-            extra_charges=booking_data.extra_charges,
-            total_price=booking_data.total_price,
-            currency=booking_data.currency,
+            base_fare=base_fare,
+            price_per_km=price_per_km,
+            route_price=route_price,
+            extra_charges=extra,
+            total_price=total_price,
+            currency=currency,
             
             booking_status="pending",
             payment_status="unpaid"
@@ -308,9 +338,18 @@ class TransportService:
         if not db_booking:
             return None
         
-        db_booking.booking_status = status
-        self.db.commit()
-        self.db.refresh(db_booking)
+        curr_status = (db_booking.booking_status or "pending").lower()
+        target_status = status.lower()
+        if curr_status != target_status:
+            allowed = ALLOWED_TRANSPORT_TRANSITIONS.get(curr_status, set())
+            if target_status not in allowed:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Cannot transition transport booking status from {curr_status} to {target_status}."
+                )
+            db_booking.booking_status = target_status
+            self.db.commit()
+            self.db.refresh(db_booking)
         return db_booking
 
     def update_booking_notes(self, booking_id: UUID, notes: str) -> Optional[TransportBooking]:

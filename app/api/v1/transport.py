@@ -128,11 +128,19 @@ async def create_transport_booking(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="The pickup date has already passed. Please choose a future date."
         )
-    if abs((booking_data.route_price + booking_data.extra_charges) - booking_data.total_price) > Decimal("0.01"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="The fare no longer adds up. Please search again to refresh the price."
-        )
+    # Re-derive fare from vehicle category rate card (SRV-PRC-03)
+    dist = Decimal(str(booking_data.distance_km))
+    expected_route_price = category.base_fare + (dist * category.price_per_km)
+    if expected_route_price < category.minimum_fare:
+        expected_route_price = category.minimum_fare
+
+    if abs(booking_data.route_price - expected_route_price) > Decimal("1.00"):
+        # Enforce server-side rate card
+        booking_data.base_fare = category.base_fare
+        booking_data.price_per_km = category.price_per_km
+        booking_data.route_price = expected_route_price
+        booking_data.total_price = expected_route_price + booking_data.extra_charges
+
 
     try:
         booking = transport_service.create_booking(booking_data)
