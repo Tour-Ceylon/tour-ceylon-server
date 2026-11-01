@@ -8,14 +8,14 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import _decode_and_verify_clerk_token, _resolve_local_user, bearer_scheme
 from app.config.database import get_db
-from app.core.rate_limit import enforce_payment_notify_rate_limit
+from app.core.rate_limit import enforce_payment_link_rate_limit, enforce_payment_notify_rate_limit
 from app.integrations.email_provider import email_provider
 from app.models.user import User
 from app.payments import service
 from app.payments.base import PaymentProviderError
 from app.payments.registry import get_provider
 from app.payments.repository import PaymentRepository
-from app.payments.schemas import CheckoutBody, CheckoutResponse, PaymentStatusResponse
+from app.payments.schemas import CheckoutBody, CheckoutResponse, PayLinkSummary, PaymentStatusResponse
 
 logger = logging.getLogger("app.payments")
 
@@ -59,6 +59,36 @@ def create_checkout(
             customer_email=body.customer_email,
             expected_amount=body.expected_amount,
         )
+    except service.PaymentError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+
+    return CheckoutResponse(
+        payment_id=payment.id,
+        order_id=payment.order_id,
+        url=instructions.url,
+        method=instructions.method,
+        fields=instructions.fields,
+        amount=payment.amount,
+        currency=payment.currency,
+    )
+
+
+@router.get("/pay-link/{token}", response_model=PayLinkSummary)
+def get_pay_link(token: str, request: Request, db: Session = Depends(get_db)):
+    """Public: what an emailed payment link is for. The signed token is the only proof needed."""
+    enforce_payment_link_rate_limit(_client_ip(request))
+    try:
+        return service.get_link_summary(db, token)
+    except service.PaymentError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+
+
+@router.post("/pay-link/{token}/checkout", response_model=CheckoutResponse)
+def checkout_from_pay_link(token: str, request: Request, db: Session = Depends(get_db)):
+    """Public: start the PayHere payment for an approved stay request."""
+    enforce_payment_link_rate_limit(_client_ip(request))
+    try:
+        payment, instructions = service.initiate_link_checkout(db, token)
     except service.PaymentError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail)
 

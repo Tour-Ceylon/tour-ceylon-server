@@ -30,11 +30,23 @@ PRICE_CHANGED = "A price has changed since you added this to your cart. Please r
 
 
 @dataclass(frozen=True)
+class PricedLine:
+    title: str
+    start: str
+    end: Optional[str]
+    nights: int
+    rooms: List[dict]  # [{"name": str, "qty": int}] for stays, empty otherwise
+    travelers: int
+    total: Decimal
+
+
+@dataclass(frozen=True)
 class PricedCart:
     amount: Decimal
     currency: str
     subtotal: Decimal
     taxes: Decimal
+    lines: List[PricedLine]
 
 
 def _money(value: Decimal) -> Decimal:
@@ -76,6 +88,23 @@ def nights_between(start: Any, end: Any) -> int:
 
 def _close(a: Decimal, b: Decimal) -> bool:
     return abs(a - b) <= TOLERANCE
+
+
+def is_stay_line(db: Session, item: Any) -> bool:
+    """A stay line carries chosen rooms, or points at a hotel listing."""
+    if not isinstance(item, dict):
+        return False
+    if item.get("selected_rooms") or item.get("selectedRooms"):
+        return True
+    try:
+        listing = db.get(Listing, UUID(str(_get(item, "listing_id", "listingId") or "")))
+    except (ValueError, TypeError):
+        return False
+    return listing is not None and getattr(listing.listing_type, "value", listing.listing_type) == "hotel"
+
+
+def contains_stay(db: Session, cart_items: Any) -> bool:
+    return any(is_stay_line(db, item) for item in (cart_items or []))
 
 
 def _price_stay(db: Session, listing: Listing, item: dict, currency: str, nights: int) -> Decimal:
@@ -146,6 +175,7 @@ def price_cart(db: Session, cart_items: Any) -> PricedCart:
 
     subtotal = Decimal(0)
     currencies = set()
+    lines: List[PricedLine] = []
     for item in items:
         listing_id = str(_get(item, "listing_id", "listingId") or "")
         try:
@@ -160,17 +190,27 @@ def price_cart(db: Session, cart_items: Any) -> PricedCart:
             raise PaymentError(409, UNVERIFIABLE)
         currencies.add(currency)
 
+        start = str(_get(item, "travel_date", "travelDate") or "")[:10]
+        end_raw = _get(item, "travel_date_end", "travelDateEnd")
+        end = str(end_raw)[:10] if end_raw else None
         if item.get("selected_rooms") or item.get("selectedRooms"):
-            nights = nights_between(
-                _get(item, "travel_date", "travelDate"), _get(item, "travel_date_end", "travelDateEnd")
-            )
-            subtotal += _price_stay(db, listing, item, currency, nights)
+            nights = nights_between(start, end)
+            line_total = _price_stay(db, listing, item, currency, nights)
+            rooms = [
+                {"name": str(r.get("roomName") or r.get("name") or "Room"), "qty": int(_dec(r.get("qty") or 1))}
+                for r in (item.get("selected_rooms") or item.get("selectedRooms") or [])
+                if isinstance(r, dict)
+            ]
+            travelers = 1
         else:
-            subtotal += _price_variant_listing(listing, item, currency)
+            nights, rooms, travelers = 1, [], _travelers(item)
+            line_total = _price_variant_listing(listing, item, currency)
+        subtotal += line_total
+        lines.append(PricedLine(str(item.get("title") or listing.title or "Booking"), start, end, nights, rooms, travelers, line_total))
 
     if len(currencies) != 1:
         raise PaymentError(409, UNVERIFIABLE)
 
     subtotal = _money(subtotal)
     taxes = _money(subtotal * TAX_RATE)
-    return PricedCart(amount=subtotal + taxes, currency=currencies.pop(), subtotal=subtotal, taxes=taxes)
+    return PricedCart(amount=subtotal + taxes, currency=currencies.pop(), subtotal=subtotal, taxes=taxes, lines=lines)

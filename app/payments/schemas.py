@@ -26,6 +26,36 @@ class CheckoutResponse(BaseModel):
     currency: str
 
 
+class PayLinkRoom(BaseModel):
+    name: str
+    qty: int
+
+
+class PayLinkLine(BaseModel):
+    title: str
+    start: str
+    end: Optional[str] = None
+    nights: int
+    rooms: List[PayLinkRoom] = []
+    travelers: int
+    total: Decimal
+
+
+class PayLinkSummary(BaseModel):
+    """What the emailed pay page shows. `state` says whether the stay can be paid for right now."""
+
+    reference: str
+    customer_name: str
+    customer_email: str
+    state: Literal["ready", "paid", "cancelled", "not_approved", "unavailable"]
+    message: Optional[str] = None
+    amount: Optional[Decimal] = None
+    currency: Optional[str] = None
+    subtotal: Optional[Decimal] = None
+    taxes: Optional[Decimal] = None
+    lines: List[PayLinkLine] = []
+
+
 class PaymentStatusResponse(BaseModel):
     payment_id: UUID
     order_id: str

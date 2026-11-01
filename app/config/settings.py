@@ -82,6 +82,8 @@ class Settings(BaseSettings):
     PUBLIC_API_URL: Optional[str] = None  # public https base URL of this server (notify_url)
     CLIENT_RETURN_URL: Optional[str] = None
     CLIENT_CANCEL_URL: Optional[str] = None
+    # How long the emailed "pay for your stay" link works, in hours
+    PAYMENT_LINK_TTL_HOURS: int = 72
 
     # ---------------------------------------------------
     # EMAIL / NOTIFICATIONS

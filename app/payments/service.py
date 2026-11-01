@@ -7,8 +7,9 @@ from typing import Mapping, Optional
 
 from sqlalchemy.orm import Session
 
+from app.models.booking import Booking
 from app.models.bookingInquiry import BookingInquiry
-from app.models.enum import InquiryStatus
+from app.models.enum import InquiryStatus, PaymentMethod, PaymentTransactionStatus
 from app.models.transportBooking import TransportBooking
 from app.models.user import User
 from app.payments.base import (
@@ -20,12 +21,15 @@ from app.payments.base import (
 )
 from app.payments.constants import FINAL_STATUSES, PaymentStatus, TargetType
 from app.payments.errors import PaymentError
-from app.payments import pricing
+from app.payments import links, pricing
 from app.payments.models import Payment
 from app.payments.registry import get_provider
 from app.payments.repository import PaymentRepository
 
 logger = logging.getLogger("app.payments")
+
+# The team has accepted the request: stays may now be paid for.
+APPROVED_INQUIRY_STATUSES = (InquiryStatus.QUOTED, InquiryStatus.CONVERTED_TO_BOOKING)
 
 
 @dataclass
@@ -77,7 +81,7 @@ class TransportBookingTarget:
             )
         return False
 
-    def not_payable_reason(self, booking: TransportBooking) -> Optional[str]:
+    def not_payable_reason(self, booking: TransportBooking, db: Session) -> Optional[str]:
         if booking.payment_status == "paid":
             return "This booking is already paid."
         if booking.booking_status in ("cancelled", "completed"):
@@ -112,7 +116,7 @@ class TransportBookingTarget:
     def reference(self, booking: TransportBooking) -> str:
         return booking.booking_reference
 
-    def apply_status(self, booking: TransportBooking, status: PaymentStatus) -> None:
+    def apply_status(self, db: Session, booking: TransportBooking, status: PaymentStatus) -> None:
         if status == PaymentStatus.SUCCEEDED:
             booking.payment_status = "paid"
             if booking.booking_status == "pending":
@@ -149,9 +153,15 @@ class BookingInquiryTarget:
             and email.strip().lower() == (inquiry.email or "").strip().lower()
         )
 
-    def not_payable_reason(self, inquiry: BookingInquiry) -> Optional[str]:
+    def not_payable_reason(self, inquiry: BookingInquiry, db: Session) -> Optional[str]:
         if inquiry.status == InquiryStatus.CANCELLED:
             return "This booking request was cancelled and cannot be paid."
+        # Stays are paid only after the team has confirmed the rooms (approve, then pay).
+        if inquiry.status not in APPROVED_INQUIRY_STATUSES and pricing.contains_stay(db, inquiry.cart_items):
+            return (
+                "Stays are paid after our team confirms availability. "
+                "We will email you a secure payment link as soon as your rooms are confirmed."
+            )
         return None
 
     def amount_and_currency(self, inquiry: BookingInquiry, db: Session):
@@ -183,9 +193,17 @@ class BookingInquiryTarget:
     def customer_email(self, inquiry: BookingInquiry) -> str:
         return inquiry.email
 
-    def apply_status(self, inquiry: BookingInquiry, status: PaymentStatus) -> None:
+    def apply_status(self, db: Session, inquiry: BookingInquiry, status: PaymentStatus) -> None:
         # The inquiry keeps its own workflow status; "paid" is read from the payments table.
-        return None
+        # The booking the approval created (stays) records the money too.
+        booking = db.get(Booking, inquiry.booking_id) if getattr(inquiry, "booking_id", None) else None
+        if booking is None:
+            return
+        if status == PaymentStatus.SUCCEEDED:
+            booking.payment_method = PaymentMethod.ONLINE
+            booking.payment_status = PaymentTransactionStatus.SUCCEEDED
+        elif status == PaymentStatus.CHARGEDBACK:
+            booking.payment_status = PaymentTransactionStatus.REFUNDED
 
 
 _TARGETS = {
@@ -222,7 +240,77 @@ def initiate_checkout(
     if obj is None or not target.authorize(obj, user, booking_reference, customer_email):
         raise PaymentError(404, "Booking not found")
 
-    reason = target.not_payable_reason(obj)
+    return _start_payment(db, provider, target, target_type, obj, expected_amount)
+
+
+def initiate_link_checkout(db: Session, token: str) -> tuple[Payment, CheckoutInstructions]:
+    """Start a payment for an approved stay request from its emailed payment link."""
+    try:
+        provider = get_provider()
+    except PaymentProviderError as exc:
+        raise PaymentError(503, str(exc))
+
+    inquiry = _inquiry_from_token(db, token)
+    return _start_payment(db, provider, _get_target(TargetType.BOOKING_INQUIRY.value), TargetType.BOOKING_INQUIRY.value, inquiry, None)
+
+
+def _inquiry_from_token(db: Session, token: str) -> BookingInquiry:
+    inquiry = db.get(BookingInquiry, links.read_payment_token(token))
+    if inquiry is None:
+        raise PaymentError(404, "This payment link is not valid.")
+    return inquiry
+
+
+def get_link_summary(db: Session, token: str) -> dict:
+    """What the pay page shows: the stay, the price and whether it can be paid right now."""
+    inquiry = _inquiry_from_token(db, token)
+    target = _get_target(TargetType.BOOKING_INQUIRY.value)
+    summary = {
+        "reference": inquiry.reference,
+        "customer_name": target.customer_name(inquiry),
+        "customer_email": inquiry.email,
+        "state": "ready",
+        "message": None,
+        "amount": None,
+        "currency": None,
+        "subtotal": None,
+        "taxes": None,
+        "lines": [],
+    }
+    if PaymentRepository(db).has_succeeded_for_target(TargetType.BOOKING_INQUIRY.value, inquiry.id):
+        return {**summary, "state": "paid", "message": "This booking has already been paid. Thank you!"}
+    if inquiry.status == InquiryStatus.CANCELLED:
+        return {**summary, "state": "cancelled", "message": "This booking request was cancelled."}
+    reason = target.not_payable_reason(inquiry, db)
+    if reason:
+        return {**summary, "state": "not_approved", "message": reason}
+    try:
+        priced = pricing.price_cart(db, inquiry.cart_items)
+    except PaymentError as exc:
+        return {**summary, "state": "unavailable", "message": exc.detail}
+    return {
+        **summary,
+        "amount": priced.amount,
+        "currency": priced.currency,
+        "subtotal": priced.subtotal,
+        "taxes": priced.taxes,
+        "lines": [
+            {
+                "title": line.title,
+                "start": line.start,
+                "end": line.end,
+                "nights": line.nights,
+                "rooms": line.rooms,
+                "travelers": line.travelers,
+                "total": line.total,
+            }
+            for line in priced.lines
+        ],
+    }
+
+
+def _start_payment(db: Session, provider, target, target_type: str, obj, expected_amount: Optional[Decimal]):
+    reason = target.not_payable_reason(obj, db)
     repo = PaymentRepository(db)
     if reason is None and repo.has_succeeded_for_target(target_type, obj.id):
         reason = "This booking is already paid."
@@ -325,7 +413,7 @@ def handle_notification(
     if event.provider_payment_id:
         payment.provider_payment_id = event.provider_payment_id
     if obj is not None:
-        target.apply_status(obj, new)
+        target.apply_status(db, obj, new)
     repo.add_event(
         payment_id=payment.id,
         provider=provider.name,

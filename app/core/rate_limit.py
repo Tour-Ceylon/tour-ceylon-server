@@ -55,3 +55,16 @@ def enforce_payment_notify_rate_limit(client_ip: str) -> None:
         limit=limit,
         window_seconds=window_seconds,
     )
+
+
+_payment_link_limiter = InMemoryRateLimiter()
+
+
+def enforce_payment_link_rate_limit(client_ip: str) -> None:
+    limit = int(os.getenv("PAYMENT_LINK_RATE_LIMIT", "60"))
+    window_seconds = int(os.getenv("PAYMENT_LINK_RATE_WINDOW_SECONDS", "60"))
+    _payment_link_limiter.check(
+        key=f"payments:link:{client_ip}",
+        limit=limit,
+        window_seconds=window_seconds,
+    )

@@ -17,6 +17,10 @@ def validate_payment_config() -> None:
             f"Unsupported PAYMENT_PROVIDER '{provider}'. Supported: {', '.join(SUPPORTED_PROVIDERS)}"
         )
 
+    # The emailed payment links are signed with SECRET_KEY, so the shipped default is unsafe in production.
+    if settings.ENV == "production" and settings.SECRET_KEY == "CHANGE_ME_IN_PRODUCTION":
+        raise RuntimeError("Set SECRET_KEY to a long random value before running with online payments in production")
+
     if provider == "payhere":
         missing = [
             name
