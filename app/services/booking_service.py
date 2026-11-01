@@ -177,7 +177,7 @@ class BookingService:
             nights=nights_list,
         )
 
-    def create_booking(self, payload: BookingCreate) -> Booking:
+    def create_booking(self, payload: BookingCreate, user_id: UUID) -> Booking:
         """
         Create a new booking with per-night availability locking and dual payment handling.
         """
@@ -222,7 +222,7 @@ class BookingService:
 
         booking = Booking(
             booking_reference=ref,
-            user_id=payload.user_id,
+            user_id=user_id,
             status=booking_status,
             total_amount=total_amount,
             currency=CurrencyCode.USD,
