@@ -74,6 +74,15 @@ class Settings(BaseSettings):
     PAYPAL_CLIENT_ID: Optional[str] = None
     PAYPAL_SECRET: Optional[str] = None
 
+    # Online payment module (app/payments). Empty PAYMENT_PROVIDER disables it.
+    PAYMENT_PROVIDER: str = ""  # payhere
+    PAYHERE_MODE: str = "sandbox"  # sandbox | live
+    PAYHERE_MERCHANT_ID: Optional[str] = None
+    PAYHERE_MERCHANT_SECRET: Optional[str] = None
+    PUBLIC_API_URL: Optional[str] = None  # public https base URL of this server (notify_url)
+    CLIENT_RETURN_URL: Optional[str] = None
+    CLIENT_CANCEL_URL: Optional[str] = None
+
     # ---------------------------------------------------
     # EMAIL / NOTIFICATIONS
     # ---------------------------------------------------

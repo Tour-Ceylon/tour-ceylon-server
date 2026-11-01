@@ -176,3 +176,5 @@ tests/
 
 testing
 .vercel
+
+!.env.example
