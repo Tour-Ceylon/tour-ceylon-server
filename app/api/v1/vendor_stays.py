@@ -432,10 +432,8 @@ async def update_property_booking_status(
 
         if new_status == StayBookingStatus.CONFIRMED and inquiry is not None:
             try:
-                from app.integrations.email_provider import EmailProvider
-                detailed = BookingInquiryService(db).get_inquiry_by_id(inquiry.id)
-                if detailed:
-                    EmailProvider().send_vendor_booking_accepted_email(detailed)
+                from app.services.inquiry_approval import notify_inquiry_approved
+                notify_inquiry_approved(db, inquiry)
             except Exception as exc:
                 logger.error(f"Failed to send confirmation email for {inquiry_ref}: {exc}")
 

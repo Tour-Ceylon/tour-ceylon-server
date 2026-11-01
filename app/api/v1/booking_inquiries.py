@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_db, require_role
 from app.core.logging import logger
+from app.models.bookingInquiry import BookingInquiry
 from app.models.enum import InquiryStatus, UserRole
 from app.models.transportBooking import TransportBooking
 from app.schemas.booking_inquiry_schema import (
@@ -320,6 +321,9 @@ def update_inquiry_status(
     """Update booking inquiry status (admin only; vendors use /vendor/booking-inquiries)"""
     try:
         service = get_booking_inquiry_service(db)
+        approved = (InquiryStatus.QUOTED, InquiryStatus.CONVERTED_TO_BOOKING)
+        existing = db.query(BookingInquiry).filter(BookingInquiry.id == inquiry_id).first()
+        was_approved = existing is not None and existing.status in approved
         inquiry = service.update_inquiry_status(inquiry_id, body.status)
         
         if not inquiry:
@@ -327,6 +331,14 @@ def update_inquiry_status(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Booking inquiry not found"
             )
+
+        # The first time a request is approved the guest is emailed (a stay gets a pay link).
+        if body.status in approved and not was_approved:
+            try:
+                from app.services.inquiry_approval import notify_inquiry_approved
+                notify_inquiry_approved(db, db.query(BookingInquiry).filter(BookingInquiry.id == inquiry_id).first())
+            except Exception as email_error:
+                logger.error(f"Approval email failed for inquiry {inquiry_id}: {email_error}")
         
         return inquiry
         

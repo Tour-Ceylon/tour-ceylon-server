@@ -1432,5 +1432,77 @@ www.trt.lk
             logger.error("Failed to send inquiry payment team alert for %s: %s", getattr(notice, "booking_reference", "?"), str(e))
             return False
 
+    def send_stay_payment_request(self, inquiry: 'BookingInquiryDetailed', offer: any) -> bool:
+        """Approved stay: confirm the rooms and send the price with a secure pay link."""
+        if not self.smtp_configured:
+            logger.warning("SMTP not configured - cannot send stay payment request for %s", inquiry.reference)
+            return False
+
+        try:
+            to_email = inquiry.email
+            if not to_email:
+                return False
+
+            msg = MIMEMultipart("alternative")
+            msg['From'] = self.email_from
+            msg['To'] = to_email
+            msg['Subject'] = f"Your stay is confirmed - complete your payment (REF: {inquiry.reference})"
+
+            def money(value) -> str:
+                return f"{value:,.2f} {offer.currency}"
+
+            stay_rows, plain_lines = [], []
+            for line in offer.lines:
+                dates = f"{line.start} to {line.end}" if line.end else line.start
+                rooms = ", ".join(f"{r['qty']} x {r['name']}" for r in line.rooms)
+                detail = " | ".join(part for part in (dates, f"{line.nights} night(s)" if line.rooms else "", rooms) if part)
+                stay_rows.append((line.title, f"{detail}  -  {money(line.total)}"))
+                plain_lines.append(f"- {line.title}: {detail} ({money(line.total)})")
+
+            expires = offer.expires_at.strftime('%B %d, %Y at %H:%M UTC')
+            plain_body = (
+                f"Dear {inquiry.first_name} {inquiry.last_name},\n\n"
+                f"Good news: our team has confirmed availability for your booking request {inquiry.reference}.\n\n"
+                + "\n".join(plain_lines)
+                + f"\n\nSubtotal: {money(offer.subtotal)}\nTaxes and fees (12%): {money(offer.taxes)}\n"
+                f"TOTAL TO PAY: {money(offer.amount)}\n\n"
+                f"Pay securely online here: {offer.url}\n\n"
+                f"Your rooms are held for you until {expires}. After that the link stops working "
+                "and the rooms may be released.\n\nWarm regards,\nTravel Ready Tours Team"
+            )
+
+            button = (
+                f'<p style="margin:28px 0;"><a href="{_escape_html(offer.url)}" '
+                'style="background:#0a1628;color:#ffffff;text-decoration:none;padding:14px 28px;'
+                'font-family:Arial,sans-serif;font-size:14px;font-weight:700;letter-spacing:0.08em;'
+                f'text-transform:uppercase;display:inline-block;">Pay {_escape_html(money(offer.amount))} now</a></p>'
+            )
+            content_html = f"""
+              <p style="margin:0 0 18px;font-size:15px;line-height:1.9;">Dear {_escape_html(inquiry.first_name)} {_escape_html(inquiry.last_name)},</p>
+              <p style="margin:0 0 18px;font-size:15px;line-height:1.9;">Good news: our team has confirmed availability for your booking request. Your rooms are held for you. Please complete your payment to secure them.</p>
+              {_render_table([("Reference", inquiry.reference)] + stay_rows + [
+                  ("Subtotal", money(offer.subtotal)),
+                  ("Taxes and fees (12%)", money(offer.taxes)),
+                  ("Total to pay", money(offer.amount)),
+              ])}
+              {button}
+              <p style="margin:0 0 12px;font-size:13px;line-height:1.7;color:#6b6257;">Your rooms are held until {_escape_html(expires)}. After that the link stops working and the rooms may be released. If the button does not open, copy this address into your browser:<br />{_escape_html(offer.url)}</p>
+              <p style="margin:24px 0 0;font-size:15px;line-height:1.9;">Warm regards,<br />Travel Ready Tours Team</p>
+            """
+            html_body = _build_email_shell(
+                overline="Travel Ready Tours",
+                title="Your stay is confirmed",
+                content_html=content_html,
+            )
+            msg.attach(MIMEText(plain_body, 'plain'))
+            msg.attach(MIMEText(html_body, 'html'))
+
+            self._send_message_smtp(msg)
+            logger.info("Stay payment request sent to %s for ref %s", to_email, inquiry.reference)
+            return True
+        except Exception as e:
+            logger.error("Failed to send stay payment request for %s: %s", getattr(inquiry, "reference", "?"), str(e))
+            return False
+
 
 email_provider = EmailProvider()

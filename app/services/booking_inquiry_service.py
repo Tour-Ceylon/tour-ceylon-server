@@ -293,6 +293,25 @@ class BookingInquiryService:
             )
 
 
+    def latest_payment_statuses(self, inquiry_ids: list) -> dict:
+        """Newest online payment status per inquiry id, in one query; empty if payments cannot be read."""
+        if not inquiry_ids:
+            return {}
+        try:
+            from app.payments.models import Payment
+
+            with self.db.begin_nested():
+                rows = (
+                    self.db.query(Payment.target_id, Payment.status)
+                    .filter(Payment.target_type == "booking_inquiry", Payment.target_id.in_(inquiry_ids))
+                    .order_by(Payment.created_at.asc())
+                    .all()
+                )
+            return {target_id: payment_status for target_id, payment_status in rows}  # later rows win
+        except Exception as exc:
+            logger.warning("Could not read payment statuses for inquiries: %s", exc)
+            return {}
+
     def _latest_payment_status(self, inquiry_id: UUID) -> str | None:
         """Status of the newest online payment for this inquiry; never lets a payments problem break inquiries."""
         try:
