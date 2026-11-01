@@ -1,6 +1,6 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Any
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
@@ -12,12 +12,16 @@ from app.integrations.email_provider import email_provider
 from app.models.booking import Booking
 from app.models.bookingItem import BookingItem
 from app.models.bookingTraveler import BookingTraveler
+from app.models.bookingStatusHistory import BookingStatusHistory
+from app.models.paymentTransactionHistory import PaymentTransaction
 from app.models.enum import (
     BookingStatus,
     CurrencyCode,
     PaymentMethod,
     PaymentTransactionStatus,
+    PaymentProvider,
     ListingType,
+    ChangedByType,
 )
 from app.models.listing import Listing
 from app.models.listingBlock import ListingBlock
@@ -177,9 +181,98 @@ class BookingService:
             nights=nights_list,
         )
 
-    def create_booking(self, payload: BookingCreate, user_id: UUID) -> Booking:
+    def _resolve_item_pricing(
+        self,
+        item: Any,
+        check_in: date,
+        check_out: date,
+        listing: Listing,
+    ) -> Tuple[Decimal, Decimal]:
+        """
+        Derives legitimate server-side unit_price and total_price for a booking item.
+        Ignores client-provided price tampering.
+        """
+        nights = Decimal(str(max(1, (check_out - check_in).days))) if listing.listing_type in (ListingType.HOTEL, ListingType.STAY) else Decimal("1")
+        quantity = Decimal(str(max(1, getattr(item, "quantity", 1) or 1)))
+
+        if listing.listing_type in (ListingType.HOTEL, ListingType.STAY):
+            property_record = self.db.query(StayProperty).filter(StayProperty.listing_id == item.listing_id).first()
+            if property_record and property_record.room_types:
+                selected_rooms = getattr(item, "selected_rooms", None) or []
+                if selected_rooms:
+                    total_stay_price = Decimal("0")
+                    total_stay_qty = Decimal("0")
+                    for sr in selected_rooms:
+                        qty = Decimal(str(sr.get("qty") or 1))
+                        r_id = sr.get("roomId")
+                        rt = None
+                        if r_id:
+                            try:
+                                rt = self.db.query(StayRoomType).filter(
+                                    StayRoomType.property_id == property_record.id,
+                                    (StayRoomType.id == UUID(r_id)) | (StayRoomType.metadata_json['sourceVariantId'].astext == str(r_id))
+                                ).first()
+                            except (ValueError, TypeError):
+                                pass
+                        if not rt and sr.get("roomName"):
+                            rt = self.db.query(StayRoomType).filter(
+                                StayRoomType.property_id == property_record.id,
+                                StayRoomType.name.ilike(f"%{sr.get('roomName').strip()}%")
+                            ).first()
+                        if not rt:
+                            rt = property_record.room_types[0]
+                        rate = Decimal(str(rt.base_price or listing.from_price or 0))
+                        total_stay_price += rate * qty * nights
+                        total_stay_qty += qty
+                    unit_price = (total_stay_price / total_stay_qty / nights).quantize(Decimal("0.01")) if total_stay_qty > 0 else Decimal(str(listing.from_price or 0))
+                    total_price = total_stay_price.quantize(Decimal("0.01"))
+                    return unit_price, total_price
+                else:
+                    rt = None
+                    if getattr(item, "variant_id", None):
+                        try:
+                            rt = self.db.query(StayRoomType).filter(
+                                StayRoomType.property_id == property_record.id,
+                                (StayRoomType.id == item.variant_id) | (StayRoomType.metadata_json['sourceVariantId'].astext == str(item.variant_id))
+                            ).first()
+                        except (ValueError, TypeError):
+                            pass
+                    if not rt:
+                        rt = property_record.room_types[0]
+                    unit_price = Decimal(str(rt.base_price or listing.from_price or 0)).quantize(Decimal("0.01"))
+                    total_price = (unit_price * quantity * nights).quantize(Decimal("0.01"))
+                    return unit_price, total_price
+            else:
+                unit_price = Decimal(str(listing.from_price or 0)).quantize(Decimal("0.01"))
+                total_price = (unit_price * quantity * nights).quantize(Decimal("0.01"))
+                return unit_price, total_price
+        else:
+            # Tour / Safari / Experience
+            variant_id = getattr(item, "variant_id", None)
+            if variant_id:
+                variant = self.db.query(ListingVariant).filter(ListingVariant.id == variant_id).first()
+                if variant and variant.pricing_rules:
+                    rule = next((r for r in variant.pricing_rules if getattr(r, 'is_active', True)), None)
+                    unit_price = Decimal(str(rule.amount)) if rule else Decimal(str(listing.from_price or 0))
+                else:
+                    unit_price = Decimal(str(listing.from_price or 0))
+            else:
+                unit_price = Decimal(str(listing.from_price or 0))
+
+            unit_price = unit_price.quantize(Decimal("0.01"))
+            total_price = (unit_price * quantity).quantize(Decimal("0.01"))
+            return unit_price, total_price
+
+    def create_booking(
+        self,
+        payload: BookingCreate,
+        user_id: UUID,
+        background_tasks: Optional[Any] = None,
+    ) -> Booking:
         """
         Create a new booking with per-night availability locking and dual payment handling.
+
+        The owner (user_id) comes from the authenticated token, never from the payload.
         """
         # Reject ONLINE payment method (reserved for future gateway)
         if payload.payment_method == PaymentMethod.ONLINE:
@@ -216,9 +309,19 @@ class BookingService:
             booking_status = BookingStatus.PENDING
             payment_status = PaymentTransactionStatus.PENDING
 
-        total_amount = Decimal("0")
+        # Resolve prices server-side
+        calculated_subtotal = Decimal("0")
+        resolved_items = []
         for item in payload.booking_items:
-            total_amount += Decimal(str(item.total_price))
+            item_listing = self.db.query(Listing).filter(Listing.id == item.listing_id).first()
+            if not item_listing:
+                raise HTTPException(status_code=404, detail=f"Listing not found: {item.listing_id}")
+            u_price, t_price = self._resolve_item_pricing(item, check_in, check_out, item_listing)
+            calculated_subtotal += t_price
+            resolved_items.append((item, u_price, t_price))
+
+        tax_amount = (calculated_subtotal * Decimal("0.12")).quantize(Decimal("0.01"))
+        total_amount = calculated_subtotal + tax_amount
 
         booking = Booking(
             booking_reference=ref,
@@ -233,7 +336,18 @@ class BookingService:
         self.db.add(booking)
         self.db.flush()
 
-        for item_data in payload.booking_items:
+        # Audit history for booking creation
+        status_hist = BookingStatusHistory(
+            booking_id=booking.id,
+            old_status=None,
+            new_status=booking_status,
+            changed_by_type=ChangedByType.USER,
+            changed_by_user_id=user_id,
+            changed_at=datetime.utcnow(),
+        )
+        self.db.add(status_hist)
+
+        for item_data, u_price, t_price in resolved_items:
             item_dict = item_data.model_dump()
             travelers_data = item_dict.pop("travelers", [])
             item_dict.pop("selected_rooms", None)
@@ -244,8 +358,8 @@ class BookingService:
                 variant_id=item_dict.get("variant_id"),
                 travel_date=item_dict.get("travel_date"),
                 quantity=item_dict.get("quantity"),
-                unit_price=item_dict.get("unit_price"),
-                total_price=item_dict.get("total_price"),
+                unit_price=float(u_price),
+                total_price=float(t_price),
             )
             self.db.add(booking_item)
             self.db.flush()
@@ -287,8 +401,11 @@ class BookingService:
             except Exception as e:
                 logger.error("Error dispatching booking notification emails: %s", str(e))
 
-        import threading
-        threading.Thread(target=_send_emails, daemon=True).start()
+        if background_tasks:
+            background_tasks.add_task(_send_emails)
+        else:
+            import threading
+            threading.Thread(target=_send_emails, daemon=True).start()
 
         return self.get_booking_by_id(booking.id)
 
@@ -300,11 +417,68 @@ class BookingService:
             .first()
         )
         if not property_record:
-            return
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Stay property record not found for this listing.",
+            )
+        if not property_record.room_types:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This stay property has no active room types available.",
+            )
 
         from app.services.stay_inventory_service import StayInventoryService
         inv_service = StayInventoryService(self.db)
 
+        # 1. Resolve target room types first
+        rooms_to_book = []
+        selected_rooms = first_item.selected_rooms or []
+        if selected_rooms:
+            for sr in selected_rooms:
+                qty = int(sr.get("qty") or 1)
+                r_id = sr.get("roomId")
+                rt = None
+                if r_id:
+                    try:
+                        rt = self.db.query(StayRoomType).filter(
+                            StayRoomType.property_id == property_record.id,
+                            (StayRoomType.id == UUID(r_id)) | (StayRoomType.metadata_json['sourceVariantId'].astext == str(r_id))
+                        ).first()
+                    except (ValueError, TypeError):
+                        pass
+                if not rt:
+                    r_name = sr.get("roomName")
+                    if r_name:
+                        rt = self.db.query(StayRoomType).filter(
+                            StayRoomType.property_id == property_record.id,
+                            StayRoomType.name.ilike(f"%{r_name.strip()}%")
+                        ).first()
+                if not rt and property_record.room_types:
+                    rt = property_record.room_types[0]
+                if rt:
+                    rooms_to_book.append({"room_type": rt, "qty": qty})
+        else:
+            rt = None
+            if first_item.variant_id:
+                try:
+                    rt = self.db.query(StayRoomType).filter(
+                        StayRoomType.property_id == property_record.id,
+                        (StayRoomType.id == first_item.variant_id) | (StayRoomType.metadata_json['sourceVariantId'].astext == str(first_item.variant_id))
+                    ).first()
+                except (ValueError, TypeError):
+                    pass
+            if not rt and property_record.room_types:
+                rt = property_record.room_types[0]
+            if rt:
+                rooms_to_book.append({"room_type": rt, "qty": first_item.quantity})
+
+        if not rooms_to_book:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No valid rooms selected for this stay booking.",
+            )
+
+        # 2. Lock & decrement calendar for EACH resolved room type (SRV-PRC-06)
         night_dates = []
         curr = check_in
         while curr < check_out:
@@ -312,8 +486,9 @@ class BookingService:
             curr += timedelta(days=1)
         night_dates.sort()
 
-        if property_record.room_types:
-            room_type = property_record.room_types[0]
+        for rb in rooms_to_book:
+            room_type = rb["room_type"]
+            needed_qty = rb["qty"]
             for night_date in night_dates:
                 calendar_row = (
                     self.db.query(StayRoomTypeCalendar)
@@ -339,14 +514,14 @@ class BookingService:
                     self.db.add(calendar_row)
                     self.db.flush()
 
-                if calendar_row.available_units < first_item.quantity:
+                if calendar_row.available_units < needed_qty:
                     raise HTTPException(
                         status_code=status.HTTP_409_CONFLICT,
-                        detail=f"Selected dates are unavailable (sold out on {night_date}).",
+                        detail=f"Selected room '{room_type.name}' is sold out on {night_date}.",
                     )
 
-                calendar_row.available_units -= first_item.quantity
-                calendar_row.booked_units += first_item.quantity
+                calendar_row.available_units -= needed_qty
+                calendar_row.booked_units += needed_qty
 
         stay_booking = StayBooking(
             booking_id=booking.id,
@@ -363,86 +538,55 @@ class BookingService:
         self.db.add(stay_booking)
         self.db.flush()
 
-        if property_record.room_types:
-            rooms_to_book = []
-            selected_rooms = first_item.selected_rooms or []
-            if selected_rooms:
-                for sr in selected_rooms:
-                    qty = int(sr.get("qty") or 1)
-                    r_id = sr.get("roomId")
-                    rt = None
-                    if r_id:
-                        try:
-                            rt = self.db.query(StayRoomType).filter(
-                                StayRoomType.property_id == property_record.id,
-                                (StayRoomType.id == UUID(r_id)) | (StayRoomType.metadata_json['sourceVariantId'].astext == r_id)
-                            ).first()
-                        except ValueError:
-                            pass
-                    if not rt:
-                        r_name = sr.get("roomName")
-                        if r_name:
-                            rt = self.db.query(StayRoomType).filter(
-                                StayRoomType.property_id == property_record.id,
-                                StayRoomType.name.ilike(f"%{r_name.strip()}%")
-                            ).first()
-                    if not rt:
-                        rt = property_record.room_types[0]
-                    if rt:
-                        rooms_to_book.append({"room_type": rt, "qty": qty})
-            else:
-                rt = None
-                if first_item.variant_id:
-                    try:
-                        rt = self.db.query(StayRoomType).filter(
-                            StayRoomType.property_id == property_record.id,
-                            (StayRoomType.id == first_item.variant_id) | (StayRoomType.metadata_json['sourceVariantId'].astext == str(first_item.variant_id))
-                        ).first()
-                    except ValueError:
-                        pass
-                if not rt:
-                    rt = property_record.room_types[0]
-                rooms_to_book.append({"room_type": rt, "qty": first_item.quantity})
+        total_qty = sum(rb["qty"] for rb in rooms_to_book)
+        per_unit_rate = Decimal(str(first_item.unit_price)) / Decimal(str(max(1, total_qty))) if total_qty > 0 else Decimal(0)
+        if not first_item.unit_price:
+            per_unit_rate = None
 
-            total_qty = sum(rb["qty"] for rb in rooms_to_book)
-            per_unit_rate = Decimal(str(first_item.unit_price)) / Decimal(str(max(1, total_qty))) if total_qty > 0 else Decimal(0)
-            if not first_item.unit_price:
-                per_unit_rate = None
+        # 3. Allocate physical room units; propagate conflicts (SRV-PRC-07)
+        for rb in rooms_to_book:
+            target_room_type = rb["room_type"]
+            try:
+                allocated_units = inv_service._allocate_room_units(
+                    property_id=property_record.id,
+                    room_type_id=target_room_type.id,
+                    requested_count=rb["qty"],
+                    check_in_date=check_in,
+                    check_out_date=check_out,
+                )
+            except Exception as alloc_err:
+                logger.error(f"Failed to allocate physical room units: {alloc_err}")
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Unable to allocate room units for '{target_room_type.name}': {alloc_err}",
+                )
 
-            for rb in rooms_to_book:
-                target_room_type = rb["room_type"]
-                try:
-                    allocated_units = inv_service._allocate_room_units(
-                        property_id=property_record.id,
-                        room_type_id=target_room_type.id,
-                        requested_count=rb["qty"],
-                        check_in_date=check_in,
-                        check_out_date=check_out,
-                    )
-                    nightly_rate = per_unit_rate if per_unit_rate is not None else Decimal(str(target_room_type.base_price or 0))
-                    for unit in allocated_units:
-                        stay_booking_room = StayBookingRoom(
-                            stay_booking_id=stay_booking.id,
-                            room_unit_id=unit.id,
-                            room_type_id=target_room_type.id,
-                            check_in_date=check_in,
-                            check_out_date=check_out,
-                            nightly_rate=nightly_rate,
-                            guests=1,
-                            metadata_json={},
-                        )
-                        self.db.add(stay_booking_room)
-                    self.db.flush()
-                except Exception as alloc_err:
-                    from app.core.logging import logger
-                    logger.warning(f"Could not auto-allocate physical room units for booking: {alloc_err}")
+            if len(allocated_units) < rb["qty"]:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Only {len(allocated_units)} of {rb['qty']} requested rooms available for '{target_room_type.name}'.",
+                )
+
+            nightly_rate = per_unit_rate if per_unit_rate is not None else Decimal(str(target_room_type.base_price or 0))
+            for unit in allocated_units:
+                stay_booking_room = StayBookingRoom(
+                    stay_booking_id=stay_booking.id,
+                    room_unit_id=unit.id,
+                    room_type_id=target_room_type.id,
+                    check_in_date=check_in,
+                    check_out_date=check_out,
+                    nightly_rate=nightly_rate,
+                    guests=1,
+                    metadata_json={},
+                )
+                self.db.add(stay_booking_room)
+            self.db.flush()
 
         try:
             room_type_ids = {rt.id for rt in (property_record.room_types or [])}
             if room_type_ids:
                 inv_service.refresh_calendar(property_record.id, room_type_ids, check_in, check_out - timedelta(days=1))
         except Exception as cal_err:
-            from app.core.logging import logger
             logger.warning(f"Could not refresh calendar after booking creation: {cal_err}")
 
     def _process_variant_booking(self, booking, payload, listing, check_in, check_out):
@@ -495,6 +639,14 @@ class BookingService:
                         avail_cal.reserved_capacity += item.quantity
                         if avail_cal.available_capacity == 0:
                             avail_cal.available_status = "SOLD_OUT"
+                else:
+                    # Item without variant_id: check listing capacity if configured
+                    listing_cap = getattr(listing, "capacity_max", None)
+                    if listing_cap and listing_cap < item.quantity:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail=f"Requested quantity ({item.quantity}) exceeds listing max capacity ({listing_cap}).",
+                        )
 
     def get_booking_by_id(self, booking_id: UUID) -> Optional[Booking]:
         return (
@@ -504,7 +656,7 @@ class BookingService:
             .first()
         )
 
-    def mark_as_paid(self, booking_id: UUID) -> Booking:
+    def mark_as_paid(self, booking_id: UUID, changed_by_user_id: Optional[UUID] = None) -> Booking:
         """Mark a pending bank transfer booking as PAID / SUCCEEDED with pessimistic locking."""
         booking = (
             self.db.query(Booking)
@@ -521,8 +673,33 @@ class BookingService:
                 detail=f"Cannot mark {booking.status.value} booking as paid.",
             )
 
+        old_status = booking.status
         booking.payment_status = PaymentTransactionStatus.SUCCEEDED
         booking.status = BookingStatus.CONFIRMED
+
+        # Audit trail
+        history = BookingStatusHistory(
+            booking_id=booking.id,
+            old_status=old_status,
+            new_status=BookingStatus.CONFIRMED,
+            changed_by_type=ChangedByType.ADMIN if changed_by_user_id else ChangedByType.SYSTEM,
+            changed_by_user_id=changed_by_user_id,
+            changed_at=datetime.utcnow(),
+        )
+        self.db.add(history)
+
+        # Record immutable payment transaction ledger entry (SRV-PAY-01 / SRV-PAY-02)
+        ref_id = f"MANUAL-{str(changed_by_user_id)[:8] if changed_by_user_id else 'SYSTEM'}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        payment_tx = PaymentTransaction(
+            booking_id=booking.id,
+            provider=PaymentProvider.MANUAL,
+            amount=float(booking.total_amount),
+            currency=booking.currency,
+            status=PaymentTransactionStatus.SUCCEEDED,
+            external_reference=ref_id,
+            created_at=datetime.utcnow(),
+        )
+        self.db.add(payment_tx)
 
         stay_booking = (
             self.db.query(StayBooking)
@@ -575,8 +752,20 @@ class BookingService:
 
         released_count = 0
         for booking in expired_bookings:
+            old_status = booking.status
             booking.status = BookingStatus.EXPIRED
             booking.payment_status = PaymentTransactionStatus.FAILED
+
+            # Audit trail
+            history = BookingStatusHistory(
+                booking_id=booking.id,
+                old_status=old_status,
+                new_status=BookingStatus.EXPIRED,
+                changed_by_type=ChangedByType.SYSTEM,
+                changed_by_user_id=None,
+                changed_at=datetime.utcnow(),
+            )
+            self.db.add(history)
 
             for item in booking.booking_items:
                 listing = self.db.query(Listing).filter(Listing.id == item.listing_id).first()

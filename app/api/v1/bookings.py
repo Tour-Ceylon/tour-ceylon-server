@@ -1,7 +1,7 @@
-from datetime import date
-from typing import List
+from datetime import date, datetime, timedelta
+from typing import List, Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Header, BackgroundTasks
 from sqlalchemy.orm import Session
 import math
 
@@ -20,7 +20,8 @@ from app.schemas.booking_schema import (
 )
 from app.api.deps import get_current_user, get_current_user_id, require_role
 from app.models.booking import Booking
-from app.models.enum import BookingStatus, UserRole
+from app.models.bookingItem import BookingItem
+from app.models.enum import BookingStatus, UserRole, ChangedByType
 from app.models.listing import Listing
 from app.models.stay import StayProperty
 from app.models.user import User
@@ -197,18 +198,37 @@ def get_listing_availability(
 @router.post("/", response_model=BookingResponse, status_code=status.HTTP_201_CREATED)
 def create_booking(
     booking_data: BookingCreate,
+    background_tasks: BackgroundTasks,
+    x_idempotency_key: Optional[str] = Header(None, alias="X-Idempotency-Key"),
     db: Session = Depends(get_db),
     current_user_id: UUID = Depends(get_current_user_id),
 ):
     """
-    Create a new booking with dual payment methods and per-night availability
-    locking.
+    Create a new booking with dual payment methods, server pricing, per-night
+    availability locking and duplicate-submit protection (SRV-PRC-05).
 
     The owner is taken from the authenticated token; BookingCreate no longer
     accepts a user_id, so a caller cannot book on another user's behalf.
     """
     service = get_booking_service(db)
-    return service.create_booking(booking_data, current_user_id)
+    if booking_data.booking_items:
+        first_item = booking_data.booking_items[0]
+        recent_cutoff = datetime.utcnow() - timedelta(seconds=15)
+        existing = (
+            db.query(Booking)
+            .join(Booking.booking_items)
+            .filter(
+                Booking.user_id == current_user_id,
+                Booking.created_at >= recent_cutoff,
+                BookingItem.listing_id == first_item.listing_id,
+            )
+            .first()
+        )
+        if existing:
+            return existing
+    return service.create_booking(
+        booking_data, current_user_id, background_tasks=background_tasks
+    )
 
 
 @router.patch("/{booking_id}/mark-paid", response_model=BookingResponse)
@@ -216,16 +236,16 @@ def mark_booking_as_paid(
     booking_id: UUID,
     db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.VENDOR])),
 ):
-    """Mark a pending bank transfer booking as PAID / SUCCEEDED (owner, admin,
-    or the vendor of a booked listing - the vendor portal booking centre calls
-    this)"""
+    """Mark a pending bank transfer booking as PAID / SUCCEEDED (admin, or the
+    vendor of a booked listing - the vendor portal booking centre calls this;
+    booking owners cannot mark their own booking paid) (SRV-PAY-01)"""
     _load_booking_for_caller(
         booking_repo, db, booking_id, current_user, allow_vendor=True
     )
     service = get_booking_service(db)
-    return service.mark_as_paid(booking_id)
+    return service.mark_as_paid(booking_id, changed_by_user_id=current_user.id)
 
 
 @router.post("/{booking_id}/receipt", response_model=BookingResponse)
@@ -497,18 +517,38 @@ async def update_booking_status(
     booking_repo: BookingRepository = Depends(get_booking_repository),
     current_user: User = Depends(get_current_user),
 ):
-    """Update booking status (owner, admin, or the vendor of a booked listing)"""
+    """Update booking status (admin, the vendor of a booked listing, or the
+    booking owner cancelling their own booking) (SRV-PRC-04)"""
 
     _load_booking_for_caller(
         booking_repo, db, booking_id, current_user, allow_vendor=True
     )
-    booking = booking_repo.update_status(booking_id, status_update.status)
+
+    if _is_admin(current_user):
+        changed_by = ChangedByType.ADMIN
+    elif _is_vendor(current_user):
+        changed_by = ChangedByType.USER
+    else:
+        # Reaching here means the caller is the booking owner (the guard above
+        # admits only owner, admin, or the listing's vendor).
+        if status_update.status != BookingStatus.CANCELLED:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Tourists may only cancel their own bookings"
+            )
+        changed_by = ChangedByType.USER
+
+    booking = booking_repo.update_status(
+        booking_id,
+        status_update.status,
+        changed_by_type=changed_by,
+        changed_by_user_id=current_user.id
+    )
     if not booking:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Booking not found"
         )
-    
     return booking
 
 
@@ -517,20 +557,26 @@ async def confirm_booking(
     booking_id: UUID,
     db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.VENDOR])),
 ):
-    """Confirm booking (set status to CONFIRMED) (owner, admin, or the vendor of a booked listing)"""
+    """Confirm booking (set status to CONFIRMED) (admin, or the vendor of a
+    booked listing)"""
 
     _load_booking_for_caller(
         booking_repo, db, booking_id, current_user, allow_vendor=True
     )
-    booking = booking_repo.update_status(booking_id, BookingStatus.CONFIRMED)
+    changed_by = ChangedByType.ADMIN if _is_admin(current_user) else ChangedByType.USER
+    booking = booking_repo.update_status(
+        booking_id,
+        BookingStatus.CONFIRMED,
+        changed_by_type=changed_by,
+        changed_by_user_id=current_user.id
+    )
     if not booking:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Booking not found"
         )
-    
     return booking
 
 
@@ -544,13 +590,18 @@ async def cancel_booking(
     """Cancel booking (set status to CANCELLED) (booking owner or admin)"""
 
     _load_booking_for_caller(booking_repo, db, booking_id, current_user)
-    booking = booking_repo.update_status(booking_id, BookingStatus.CANCELLED)
+    changed_by = ChangedByType.ADMIN if _is_admin(current_user) else ChangedByType.USER
+    booking = booking_repo.update_status(
+        booking_id,
+        BookingStatus.CANCELLED,
+        changed_by_type=changed_by,
+        changed_by_user_id=current_user.id
+    )
     if not booking:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Booking not found"
         )
-    
     return booking
 
 
@@ -559,20 +610,26 @@ async def complete_booking(
     booking_id: UUID,
     db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.VENDOR])),
 ):
-    """Complete booking (set status to COMPLETED) (owner, admin, or the vendor of a booked listing)"""
+    """Complete booking (set status to COMPLETED) (admin, or the vendor of a
+    booked listing)"""
 
     _load_booking_for_caller(
         booking_repo, db, booking_id, current_user, allow_vendor=True
     )
-    booking = booking_repo.update_status(booking_id, BookingStatus.COMPLETED)
+    changed_by = ChangedByType.ADMIN if _is_admin(current_user) else ChangedByType.USER
+    booking = booking_repo.update_status(
+        booking_id,
+        BookingStatus.COMPLETED,
+        changed_by_type=changed_by,
+        changed_by_user_id=current_user.id
+    )
     if not booking:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Booking not found"
         )
-    
     return booking
 
 

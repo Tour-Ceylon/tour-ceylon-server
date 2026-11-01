@@ -202,24 +202,95 @@ class BookingInquiryService:
             raise
 
     def _validate_pricing(self, inquiry_data: BookingInquiryCreate) -> None:
-        """Validate that cart items pricing is consistent with totals"""
-        calculated_subtotal = sum(
-            item.price * item.travel_count for item in inquiry_data.cart_items
-        )
-        
-        # Log pricing details for debugging
-        logger.info(f"Pricing validation - Calculated: {calculated_subtotal}, Provided: {inquiry_data.subtotal}")
+        """Validate that cart items pricing is consistent with database authoritative listings (SRV-PRC-02)"""
+        from app.models.listing import Listing
+        from app.models.stay import StayProperty, StayRoomType
+        from app.models.listingVariant import ListingVariant
+
+        calculated_subtotal = Decimal("0")
         for item in inquiry_data.cart_items:
-            item_total = item.price * item.travel_count
-            logger.info(f"Item: {item.title}, Price: {item.price}, Count: {item.travel_count}, Total: {item_total}")
-        
-        # Make validation more flexible - warn instead of error for subtotal mismatch
-        if abs(calculated_subtotal - inquiry_data.subtotal) > Decimal('0.01'):
-            logger.warning(f"Subtotal mismatch - Calculated: {calculated_subtotal}, Provided: {inquiry_data.subtotal}. Using provided subtotal.")
-        
-        # Still validate that total is not less than subtotal
+            # For stays with selected_rooms, item total is sum of room prices * room quantities
+            item_total = Decimal("0")
+            if getattr(item, "selected_rooms", None) and isinstance(item.selected_rooms, list):
+                rooms_sum = Decimal("0")
+                for sr in item.selected_rooms:
+                    if isinstance(sr, dict):
+                        r_price = Decimal(str(sr.get("price") or 0))
+                        r_qty = Decimal(str(sr.get("qty") or 1))
+                        rooms_sum += r_price * r_qty
+                if rooms_sum > Decimal("0"):
+                    item_total = rooms_sum
+
+            if item_total <= Decimal("0"):
+                item_total = item.price * Decimal(str(item.travel_count or 1))
+
+            calculated_subtotal += item_total
+
+            # Verify against database listing
+            listing = None
+            try:
+                listing = self.db.query(Listing).filter(Listing.id == UUID(str(item.listing_id))).first()
+            except (ValueError, TypeError):
+                pass
+
+            if listing:
+                # If the listing is inactive, reject
+                if hasattr(listing, "is_active") and not listing.is_active:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Listing '{item.title}' is currently unavailable.",
+                    )
+                # Verify price: price should not be 0 or less than minimum viable price
+                min_price = Decimal("0")
+                from_p = getattr(listing, "from_price", None)
+                if isinstance(from_p, dict):
+                    min_price = Decimal(str(from_p.get("amount") or 0))
+                elif isinstance(from_p, (int, float, Decimal)):
+                    min_price = Decimal(str(from_p))
+
+                # For stays, verify against room base price if available
+                if getattr(item, "selected_rooms", None) and isinstance(item.selected_rooms, list):
+                    prop = self.db.query(StayProperty).filter(StayProperty.listing_id == listing.id).first()
+                    if prop and prop.room_types:
+                        for sr in item.selected_rooms:
+                            if isinstance(sr, dict):
+                                room_id = sr.get("roomId") or sr.get("id")
+                                if room_id:
+                                    try:
+                                        rt = self.db.query(StayRoomType).filter(
+                                            StayRoomType.property_id == prop.id,
+                                            StayRoomType.id == UUID(str(room_id))
+                                        ).first()
+                                        if rt and rt.base_price:
+                                            min_price = Decimal(str(rt.base_price))
+                                    except (ValueError, TypeError):
+                                        pass
+
+                # If client-provided price deviates to zero or an unreasonable fraction of DB price, reject
+                if item.price <= Decimal("0"):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Invalid price for listing '{item.title}'.",
+                    )
+                if min_price > Decimal("0") and item.price < (min_price * Decimal("0.2")):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Pricing mismatch for '{item.title}'. Database rate is higher than submitted price.",
+                    )
+
+        # Enforce subtotal consistency
+        if abs(calculated_subtotal - inquiry_data.subtotal) > Decimal('1.00'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cart subtotal mismatch (calculated {calculated_subtotal}, provided {inquiry_data.subtotal}). Please refresh your cart.",
+            )
+
         if inquiry_data.total < inquiry_data.subtotal:
-            raise ValueError("Total amount cannot be less than subtotal")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Total amount cannot be less than subtotal.",
+            )
+
 
     def _convert_to_detailed_response(self, db_inquiry: BookingInquiry) -> BookingInquiryDetailed:
         """Convert database model to detailed response schema"""
@@ -344,12 +415,16 @@ class BookingInquiryService:
         from app.models.stay import StayProperty, StayRoomType, StayRoomUnit, StayBooking, StayBookingRoom, StayRoomBlock
         from app.models.booking import Booking
         from app.models.user import User
-        from app.models.enum import StayBookingStatus, StayRoomBlockStatus, BookingStatus, PaymentTransactionStatus, CurrencyCode
+        from app.models.enum import StayBookingStatus, StayRoomBlockStatus, BookingStatus, PaymentTransactionStatus, CurrencyCode, UserRole, InquiryStatus
         from datetime import datetime, timedelta, date
         from decimal import Decimal
         from uuid import UUID
 
-        system_user = self.db.query(User).first()
+        # Attribute to inquiry owner if registered, otherwise fallback to admin user (SRV-PRC-09)
+        target_user = self.db.query(User).filter(User.email.ilike(db_inquiry.email.strip())).first()
+        if not target_user:
+            target_user = self.db.query(User).filter(User.role == UserRole.ADMIN).first()
+
 
         from app.models.listing import Listing
         from app.models.listingVariant import ListingVariant
@@ -503,15 +578,20 @@ class BookingInquiryService:
                     if not parent_booking:
                         parent_booking = Booking(
                             booking_reference=db_inquiry.reference,
-                            user_id=system_user.id if system_user else None,
+                            user_id=target_user.id if target_user else None,
                             status=target_booking_status,
-                            total_amount=Decimal(str(db_inquiry.total or 100)),
+                            total_amount=Decimal(str(db_inquiry.total or 0)),
                             currency=CurrencyCode.USD,
                             payment_status=PaymentTransactionStatus.PENDING,
                             booked_at=db_inquiry.created_at or datetime.utcnow(),
                         )
                         self.db.add(parent_booking)
                         self.db.flush()
+
+                    # Set foreign key on inquiry (SRV-PRC-10)
+                    db_inquiry.booking_id = parent_booking.id
+                    if confirm:
+                        db_inquiry.status = InquiryStatus.CONVERTED_TO_BOOKING
 
                     stay_booking = StayBooking(
                         booking_id=parent_booking.id,
@@ -528,11 +608,11 @@ class BookingInquiryService:
                     self.db.add(stay_booking)
                     self.db.flush()
 
-                    total_item_price = Decimal(str(item.get("price") or 100))
+                    total_item_price = Decimal(str(item.get("price") or 0))
                     total_qty = sum(rb["qty"] for rb in rooms_to_book)
                     per_unit_rate = total_item_price / Decimal(str(max(1, total_qty)))
 
-                    # Allocate units for each requested room type
+                    # Allocate units for each requested room type with pessimistic locking (SRV-PRC-09)
                     inactive_statuses = {"maintenance", "blocked", "inactive", "out_of_service"}
                     units_to_allocate = []
                     for rb in rooms_to_book:
@@ -542,7 +622,7 @@ class BookingInquiryService:
                         all_units = self.db.query(StayRoomUnit).filter(
                             StayRoomUnit.property_id == prop.id,
                             StayRoomUnit.room_type_id == room_type.id
-                        ).all()
+                        ).with_for_update().all()
 
                         available_units = []
                         for unit in all_units:

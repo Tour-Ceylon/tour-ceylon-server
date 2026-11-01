@@ -4,7 +4,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_role
+from app.models.enum import UserRole
 
 from app.api.errors import AdminAPIError
 from app.api.v1.admin.dependencies import get_admin_service, get_media_service
@@ -29,7 +30,11 @@ from app.services.admin.dashboard_service import AdminDashboardService
 from app.services.media_service import MediaService
 from app.models.user import User
 
-router = APIRouter(prefix="/listings", tags=["admin-listings"])
+router = APIRouter(
+    prefix="/listings",
+    tags=["admin-listings"],
+    dependencies=[Depends(require_role([UserRole.ADMIN, UserRole.VENDOR]))],
+)
 
 AdminListingResponse = (
     StayListingResponse
@@ -382,6 +387,7 @@ async def update_listing_status(
     listing_id: UUID,
     payload: ListingStatusUpdateRequest,
     service: AdminDashboardService = Depends(get_admin_service),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
 ):
     return service.update_listing_status(category, listing_id, payload.status)
 
@@ -401,7 +407,15 @@ async def update_listing(
     listing_id: UUID,
     payload: ListingUpdateRequest,
     service: AdminDashboardService = Depends(get_admin_service),
+    current_user: User = Depends(get_current_user),
 ):
+    # Verify vendor only updates their own listing
+    role_str = str(current_user.role.value if hasattr(current_user.role, "value") else current_user.role).upper()
+    if role_str != UserRole.ADMIN.value:
+        listing = service.get_any_listing_by_id(listing_id, current_user)
+        if listing.vendor_id != current_user.id:
+            raise AdminAPIError(status_code=status.HTTP_403_FORBIDDEN, message="Not authorized to edit this listing")
+
     return service.update_listing(
         category,
         listing_id,
@@ -426,6 +440,10 @@ async def update_listing_any(
     current_user: User = Depends(get_current_user),
 ):
     listing = service.get_any_listing_by_id(listing_id, current_user)
+    role_str = str(current_user.role.value if hasattr(current_user.role, "value") else current_user.role).upper()
+    if role_str != UserRole.ADMIN.value and listing.vendor_id != current_user.id:
+        raise AdminAPIError(status_code=status.HTTP_403_FORBIDDEN, message="Not authorized to edit this listing")
+
     cat = listing.listing_type.value if hasattr(listing.listing_type, 'value') else str(listing.listing_type)
     return service.update_listing(
         cat,
@@ -439,6 +457,7 @@ async def delete_listing(
     category: AdminListingCategory,
     listing_id: UUID,
     service: AdminDashboardService = Depends(get_admin_service),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
 ):
     service.delete_listing(category, listing_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

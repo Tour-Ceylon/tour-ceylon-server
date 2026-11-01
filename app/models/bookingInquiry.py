@@ -1,5 +1,6 @@
-from sqlalchemy import Column, String, Integer, Numeric, Text, Enum
-from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy import Column, String, Integer, Numeric, Text, Enum, ForeignKey
+from sqlalchemy.dialects.postgresql import JSON, UUID
+from sqlalchemy.orm import relationship
 
 from app.models.base import Base, UUIDMixin, TimestampMixin
 from app.models.enum import CurrencyCode, InquiryStatus
@@ -31,8 +32,14 @@ class BookingInquiry(Base, UUIDMixin, TimestampMixin):
     # Status tracking
     status = Column(Enum(InquiryStatus, name="inquiry_status_enum"), nullable=False, default=InquiryStatus.PENDING_CONTACT)
     
+    # Optional foreign key to confirmed booking
+    booking_id = Column(UUID(as_uuid=True), ForeignKey("bookings.id"), nullable=True, index=True)
+
     # JSON field for cart items
     cart_items = Column(JSON, nullable=False)
+
+    # Relationship
+    booking = relationship("Booking", backref="inquiries", foreign_keys=[booking_id])
 
 
 BookingInquiries = BookingInquiry

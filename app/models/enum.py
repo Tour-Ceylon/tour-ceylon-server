@@ -32,6 +32,15 @@ class VendorStatus(str, Enum):
     SUSPENDED = "suspended"
 
 
+class TransportBookingStatus(str, Enum):
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
+
 class ListingType(str, Enum):
     TOUR = "tour"
     TRANSFER = "transfer"
