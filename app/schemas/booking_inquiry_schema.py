@@ -159,6 +159,8 @@ class BookingInquiryDetailed(BookingInquiryBase):
     vendor_name: str | None = Field(None, alias="vendorName")
     vendor_email: str | None = Field(None, alias="vendorEmail")
     vendor_role: str | None = Field(None, alias="vendorRole")
+    # Latest online payment status (initiated, pending, succeeded, ...), or None if never started.
+    payment_status: str | None = None
     
     model_config = ConfigDict(
         from_attributes=True,

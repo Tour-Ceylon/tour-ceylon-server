@@ -1339,5 +1339,98 @@ www.trt.lk
             logger.error("Failed to send payment received email for %s: %s", getattr(notice, "booking_reference", "?"), str(e))
             return False
 
+    def send_inquiry_payment_received(self, notice: any) -> bool:
+        """Receipt for a cart booking (stay, package, safari, experience) paid online."""
+        if not self.smtp_configured:
+            logger.warning("SMTP not configured - cannot send inquiry payment receipt")
+            return False
+
+        try:
+            msg = MIMEMultipart("alternative")
+            msg['From'] = self.email_from
+            msg['To'] = notice.customer_email
+            msg['Subject'] = f"Payment received - REF: {notice.booking_reference}"
+
+            amount_str = f"{notice.amount:,.2f} {notice.currency}"
+            plain_body = (
+                f"Dear {notice.customer_name},\n\n"
+                f"We have received your payment of {amount_str} for booking request "
+                f"{notice.booking_reference}. Our team will now confirm availability and "
+                "contact you with the next steps.\n\n"
+                f"Payment reference: {notice.order_id}\n\n"
+                "Warm regards,\nTravel Ready Tours Team"
+            )
+            content_html = f"""
+              <p style="margin:0 0 18px;font-size:15px;line-height:1.9;">Dear {_escape_html(notice.customer_name)},</p>
+              <p style="margin:0 0 18px;font-size:15px;line-height:1.9;">We have received your payment. Our team will now confirm availability and contact you with the next steps.</p>
+              {_render_table([
+                  ("Booking reference", notice.booking_reference),
+                  ("Amount paid", amount_str),
+                  ("Payment reference", notice.order_id),
+              ])}
+              <p style="margin:24px 0 0;font-size:15px;line-height:1.9;">Warm regards,<br />Travel Ready Tours Team</p>
+            """
+            html_body = _build_email_shell(
+                overline="Travel Ready Tours",
+                title="Payment received",
+                content_html=content_html,
+            )
+            msg.attach(MIMEText(plain_body, 'plain'))
+            msg.attach(MIMEText(html_body, 'html'))
+
+            self._send_message_smtp(msg)
+            logger.info("Inquiry payment receipt sent for %s", notice.booking_reference)
+            return True
+        except Exception as e:
+            logger.error("Failed to send inquiry payment receipt for %s: %s", getattr(notice, "booking_reference", "?"), str(e))
+            return False
+
+    def send_inquiry_payment_team_alert(self, notice: any) -> bool:
+        """Tell the business team a cart booking has been paid online."""
+        if not self.smtp_configured:
+            logger.warning("SMTP not configured - cannot send inquiry payment team alert")
+            return False
+
+        try:
+            to_email = settings.INQUIRY_EMAIL or "bookings@tourceylon.com"
+            admin_url = str(settings.ADMIN_APP_URL).rstrip("/")
+            amount_str = f"{notice.amount:,.2f} {notice.currency}"
+
+            msg = MIMEMultipart("alternative")
+            msg['From'] = self.email_from
+            msg['To'] = to_email
+            msg['Subject'] = f"PAID online - {notice.booking_reference} ({amount_str})"
+
+            plain_body = (
+                f"Booking request {notice.booking_reference} was paid online.\n\n"
+                f"Customer: {notice.customer_name} <{notice.customer_email}>\n"
+                f"Amount: {amount_str}\nPayment reference: {notice.order_id}\n\n"
+                f"Please confirm availability and contact the customer. Admin: {admin_url}"
+            )
+            content_html = f"""
+              <p style="margin:0 0 18px;font-size:15px;line-height:1.9;">A booking request has been <strong>paid online</strong>. Please confirm availability and contact the customer.</p>
+              {_render_table([
+                  ("Booking reference", notice.booking_reference),
+                  ("Customer", f"{notice.customer_name} ({notice.customer_email})"),
+                  ("Amount paid", amount_str),
+                  ("Payment reference", notice.order_id),
+              ])}
+              <p style="margin:24px 0 0;font-size:15px;line-height:1.9;"><a href="{_escape_html(admin_url)}" style="color:#0a1628;">Open the admin portal</a></p>
+            """
+            html_body = _build_email_shell(
+                overline="Travel Ready Tours",
+                title="Booking paid online",
+                content_html=content_html,
+            )
+            msg.attach(MIMEText(plain_body, 'plain'))
+            msg.attach(MIMEText(html_body, 'html'))
+
+            self._send_message_smtp(msg)
+            logger.info("Inquiry payment team alert sent for %s", notice.booking_reference)
+            return True
+        except Exception as e:
+            logger.error("Failed to send inquiry payment team alert for %s: %s", getattr(notice, "booking_reference", "?"), str(e))
+            return False
+
 
 email_provider = EmailProvider()

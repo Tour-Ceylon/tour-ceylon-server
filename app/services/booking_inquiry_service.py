@@ -292,6 +292,23 @@ class BookingInquiryService:
             )
 
 
+    def _latest_payment_status(self, inquiry_id: UUID) -> str | None:
+        """Status of the newest online payment for this inquiry; never lets a payments problem break inquiries."""
+        try:
+            from app.payments.models import Payment
+
+            with self.db.begin_nested():
+                row = (
+                    self.db.query(Payment.status)
+                    .filter(Payment.target_type == "booking_inquiry", Payment.target_id == inquiry_id)
+                    .order_by(Payment.created_at.desc())
+                    .first()
+                )
+            return row[0] if row else None
+        except Exception as exc:
+            logger.warning("Could not read payment status for inquiry %s: %s", inquiry_id, exc)
+            return None
+
     def _convert_to_detailed_response(self, db_inquiry: BookingInquiry) -> BookingInquiryDetailed:
         """Convert database model to detailed response schema"""
         from decimal import Decimal
@@ -401,7 +418,8 @@ class BookingInquiryService:
             vendor_id=top_vendor_id,
             vendor_name=top_vendor_name,
             vendor_email=top_vendor_email,
-            vendor_role=top_vendor_role
+            vendor_role=top_vendor_role,
+            payment_status=self._latest_payment_status(db_inquiry.id),
         )
 
     def _auto_provision_stay_bookings(self, db_inquiry: BookingInquiry, confirm: bool = False) -> None:
