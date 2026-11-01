@@ -94,3 +94,4 @@ __all__ = [
 ]
 
 from app.models.listingBlock import ListingBlock
+from app.payments.models import Payment, PaymentEvent  # noqa: F401
