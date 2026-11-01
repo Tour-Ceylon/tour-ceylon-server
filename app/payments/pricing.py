@@ -112,8 +112,17 @@ def _price_stay(db: Session, listing: Listing, item: dict, currency: str, nights
     return _money(per_night * nights)
 
 
+def _travelers(item: dict) -> int:
+    count = int(_dec(_get(item, "travel_count", "travelCount")))
+    return count if count >= 1 else 1
+
+
 def _price_variant_listing(listing: Listing, item: dict, currency: str) -> Decimal:
-    """Tours, packages, safaris and experiences: the price must be one of the listing's variant prices."""
+    """Tours, packages, safaris and experiences are priced per person.
+
+    The submitted price must be one of the listing's variant prices, and the
+    line costs that price times the number of travelers (as the cart shows).
+    """
     price = _dec(item.get("price"))
     amounts: List[Decimal] = []
     for variant in listing.variants or []:
@@ -127,7 +136,7 @@ def _price_variant_listing(listing: Listing, item: dict, currency: str) -> Decim
         raise PaymentError(409, UNVERIFIABLE)
     if not any(_close(price, amount) for amount in amounts):
         raise PaymentError(409, PRICE_CHANGED)
-    return _money(price)
+    return _money(price * _travelers(item))
 
 
 def price_cart(db: Session, cart_items: Any) -> PricedCart:

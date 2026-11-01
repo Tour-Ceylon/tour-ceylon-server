@@ -218,3 +218,26 @@ def test_nights_between_matches_client_rule():
     assert pricing.nights_between("2027-03-01", "2027-03-01") == 1
     assert pricing.nights_between("2027-03-04", "2027-03-01") == 1
     assert pricing.nights_between(None, None) == 1
+
+
+def test_per_person_price_is_multiplied_by_travelers(db):
+    listing = make_listing(db, ListingType.EXPERIENCE)
+    add_variant(db, listing, "Walking tour", 25.0)
+    item = {"listing_id": str(listing.id), "title": "Walk", "travel_date": "2027-03-01", "travel_count": 2,
+            "price": 25, "base_currency": "USD"}
+    priced = pricing.price_cart(db, [item])
+    assert priced.subtotal == Decimal("50.00")
+    assert priced.amount == Decimal("56.00")  # 50.00 + 6.00 tax
+
+
+def test_three_item_cart_from_the_bug_report(db):
+    """45 + 1320 + 25 per person, two travelers each: 2780 before tax, which the old server check also expects."""
+    items = []
+    for price in (45.0, 1320.0, 25.0):
+        listing = make_listing(db, ListingType.TOUR)
+        add_variant(db, listing, "Standard", price)
+        items.append({"listing_id": str(listing.id), "title": "Item", "travel_date": "2026-11-01", "travel_count": 2,
+                      "price": price, "base_currency": "USD"})
+    priced = pricing.price_cart(db, items)
+    assert priced.subtotal == Decimal("2780.00")
+    assert priced.amount == Decimal("3113.60")
