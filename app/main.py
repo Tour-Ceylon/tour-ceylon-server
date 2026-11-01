@@ -14,6 +14,9 @@ from app.config.database import engine
 import app.models
 from app.models.base import Base
 from app.config.settings import settings
+from app.payments.registry import validate_payment_config
+
+validate_payment_config()
 
 # Note: Database tables should be created via Alembic migrations
 # Base.metadata.create_all(bind=engine) # Removed for serverless deployment
