@@ -5,6 +5,7 @@ from app.api.v1.admin import (
     destinations,
     drivers,
     listings,
+    payments,
     reset,
     settings,
     snapshot,
@@ -24,3 +25,5 @@ router.include_router(settings.router)
 router.include_router(reset.router)
 router.include_router(drivers.router)
 router.include_router(transport_bookings.router)
+
+router.include_router(payments.router)
