@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import time
@@ -93,9 +94,16 @@ allowed_origins = [
 ]
 
 # Allow additional origins from environment variable
-additional_origins = os.getenv("ADDITIONAL_CORS_ORIGINS", "")
+# Accepts a JSON list (the form settings.py requires) or a comma-separated list.
+additional_origins = os.getenv("ADDITIONAL_CORS_ORIGINS", "").strip()
 if additional_origins:
-    allowed_origins.extend([origin.strip() for origin in additional_origins.split(",")])
+    try:
+        parsed_origins = json.loads(additional_origins)
+        if not isinstance(parsed_origins, list):
+            parsed_origins = [parsed_origins]
+    except ValueError:
+        parsed_origins = additional_origins.split(",")
+    allowed_origins.extend(str(origin).strip().rstrip("/") for origin in parsed_origins if str(origin).strip())
 
 app.add_middleware(
     CORSMiddleware,
