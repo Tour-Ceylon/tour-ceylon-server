@@ -1294,5 +1294,50 @@ www.trt.lk
             logger.error("Failed to send customer driver assigned email for %s: %s", getattr(booking, "booking_reference", "unknown"), str(e))
             return False
 
+    def send_transport_payment_received(self, notice: any) -> bool:
+        """Tell the customer their online payment for a transfer was received."""
+        if not self.smtp_configured:
+            logger.warning("SMTP not configured - cannot send payment received email")
+            return False
+
+        try:
+            msg = MIMEMultipart("alternative")
+            msg['From'] = self.email_from
+            msg['To'] = notice.customer_email
+            msg['Subject'] = f"Payment received - REF: {notice.booking_reference}"
+
+            amount_str = f"{notice.amount:,.2f} {notice.currency}"
+            plain_body = (
+                f"Dear {notice.customer_name},\n\n"
+                f"We have received your payment of {amount_str} for transfer booking "
+                f"{notice.booking_reference}. Your booking is confirmed.\n\n"
+                f"Payment reference: {notice.order_id}\n\n"
+                "Warm regards,\nTravel Ready Tours Team"
+            )
+            content_html = f"""
+              <p style="margin:0 0 18px;font-size:15px;line-height:1.9;">Dear {_escape_html(notice.customer_name)},</p>
+              <p style="margin:0 0 18px;font-size:15px;line-height:1.9;">We have received your payment. Your transfer booking is confirmed.</p>
+              {_render_table([
+                  ("Booking reference", notice.booking_reference),
+                  ("Amount paid", amount_str),
+                  ("Payment reference", notice.order_id),
+              ])}
+              <p style="margin:24px 0 0;font-size:15px;line-height:1.9;">Warm regards,<br />Travel Ready Tours Team</p>
+            """
+            html_body = _build_email_shell(
+                overline="Travel Ready Tours",
+                title="Payment received",
+                content_html=content_html,
+            )
+            msg.attach(MIMEText(plain_body, 'plain'))
+            msg.attach(MIMEText(html_body, 'html'))
+
+            self._send_message_smtp(msg)
+            logger.info("Payment received email sent for %s", notice.booking_reference)
+            return True
+        except Exception as e:
+            logger.error("Failed to send payment received email for %s: %s", getattr(notice, "booking_reference", "?"), str(e))
+            return False
+
 
 email_provider = EmailProvider()

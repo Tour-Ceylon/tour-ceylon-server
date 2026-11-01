@@ -41,3 +41,17 @@ def enforce_wishlist_toggle_rate_limit(user_id: UUID) -> None:
         limit=limit,
         window_seconds=window_seconds,
     )
+
+
+_payment_notify_limiter = InMemoryRateLimiter()
+
+
+def enforce_payment_notify_rate_limit(client_ip: str) -> None:
+    # Generous: gateways retry, and the limiter is per-process.
+    limit = int(os.getenv("PAYMENT_NOTIFY_RATE_LIMIT", "120"))
+    window_seconds = int(os.getenv("PAYMENT_NOTIFY_RATE_WINDOW_SECONDS", "60"))
+    _payment_notify_limiter.check(
+        key=f"payments:notify:{client_ip}",
+        limit=limit,
+        window_seconds=window_seconds,
+    )

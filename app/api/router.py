@@ -153,4 +153,10 @@ api_router.include_router(
     tags=["transfers"]
 )
 
+from app.payments.router import router as payments_router  # noqa: E402
 
+api_router.include_router(
+    payments_router,
+    prefix="/payments",
+    tags=["payments"]
+)
