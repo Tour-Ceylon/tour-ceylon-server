@@ -14,6 +14,7 @@ from app.models.listing import Listing
 from app.models.listingMedia import ListingMedia
 from app.models.listingVariant import ListingVariant
 from app.models.media import MediaAsset
+from app.models.notification import ClientNotification, NotificationType
 from app.models.paymentTransactionHistory import PaymentTransaction
 from app.models.pricingRule import PricingRule
 from app.models.review import Review

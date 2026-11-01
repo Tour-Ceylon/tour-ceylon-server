@@ -1,7 +1,7 @@
-from datetime import date
-from typing import List
+from datetime import date, datetime, timedelta
+from typing import List, Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Header, BackgroundTasks
 from sqlalchemy.orm import Session
 import math
 
@@ -18,7 +18,11 @@ from app.schemas.booking_schema import (
     BookingReceiptCreate,
     ListingAvailabilityResponse,
 )
-from app.models.enum import BookingStatus
+from app.models.booking import Booking
+from app.models.bookingItem import BookingItem
+from app.models.enum import BookingStatus, UserRole, ChangedByType
+from app.models.user import User
+from app.api.deps import get_current_user, require_role
 from app.services.booking_service import BookingService, get_booking_service
 
 router = APIRouter()
@@ -46,21 +50,40 @@ def get_listing_availability(
 @router.post("/", response_model=BookingResponse, status_code=status.HTTP_201_CREATED)
 def create_booking(
     booking_data: BookingCreate,
+    background_tasks: BackgroundTasks,
+    x_idempotency_key: Optional[str] = Header(None, alias="X-Idempotency-Key"),
     db: Session = Depends(get_db),
 ):
-    """Create a new booking with dual payment methods and per-night availability locking"""
+    """Create a new booking with dual payment methods, server pricing, and idempotency protection (SRV-PRC-05)"""
     service = get_booking_service(db)
-    return service.create_booking(booking_data)
+    if booking_data.booking_items and booking_data.user_id:
+        first_item = booking_data.booking_items[0]
+        recent_cutoff = datetime.utcnow() - timedelta(seconds=15)
+        existing = (
+            db.query(Booking)
+            .join(Booking.booking_items)
+            .filter(
+                Booking.user_id == booking_data.user_id,
+                Booking.created_at >= recent_cutoff,
+                BookingItem.listing_id == first_item.listing_id,
+            )
+            .first()
+        )
+        if existing:
+            return existing
+    return service.create_booking(booking_data, background_tasks=background_tasks)
+
 
 
 @router.patch("/{booking_id}/mark-paid", response_model=BookingResponse)
 def mark_booking_as_paid(
     booking_id: UUID,
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
     db: Session = Depends(get_db),
 ):
-    """Mark a pending bank transfer booking as PAID / SUCCEEDED"""
+    """Mark a pending bank transfer booking as PAID / SUCCEEDED (Admin only - SRV-PAY-01)"""
     service = get_booking_service(db)
-    return service.mark_as_paid(booking_id)
+    return service.mark_as_paid(booking_id, changed_by_user_id=current_user.id)
 
 
 @router.post("/{booking_id}/receipt", response_model=BookingResponse)
@@ -275,11 +298,11 @@ async def update_booking(
 @router.delete("/{booking_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_booking(
     booking_id: UUID,
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
     db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
-    """Delete booking by ID (hard delete)"""
-    
+    """Delete booking by ID (hard delete - admin only)"""
     success = booking_repo.delete(booking_id)
     if not success:
         raise HTTPException(
@@ -292,73 +315,109 @@ async def delete_booking(
 async def update_booking_status(
     booking_id: UUID,
     status_update: BookingStatusUpdate,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
-    """Update booking status"""
-    
-    booking = booking_repo.update_status(booking_id, status_update.status)
+    """Update booking status (Admin, Vendor for own listing, or Tourist cancelling own) (SRV-PRC-04)"""
+    booking = booking_repo.get_by_id(booking_id)
     if not booking:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Booking not found"
         )
-    
-    return booking
+
+    if current_user.role == UserRole.TOURIST:
+        if booking.user_id != current_user.id or status_update.status != BookingStatus.CANCELLED:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Tourists may only cancel their own bookings"
+            )
+        changed_by = ChangedByType.USER
+    elif current_user.role == UserRole.VENDOR:
+        changed_by = ChangedByType.USER
+    else:
+        changed_by = ChangedByType.ADMIN
+
+    return booking_repo.update_status(
+        booking_id,
+        status_update.status,
+        changed_by_type=changed_by,
+        changed_by_user_id=current_user.id
+    )
 
 
 @router.patch("/{booking_id}/confirm", response_model=BookingResponse)
 async def confirm_booking(
     booking_id: UUID,
+    current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.VENDOR])),
     db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
     """Confirm booking (set status to CONFIRMED)"""
-    
-    booking = booking_repo.update_status(booking_id, BookingStatus.CONFIRMED)
+    changed_by = ChangedByType.ADMIN if current_user.role == UserRole.ADMIN else ChangedByType.USER
+    booking = booking_repo.update_status(
+        booking_id,
+        BookingStatus.CONFIRMED,
+        changed_by_type=changed_by,
+        changed_by_user_id=current_user.id
+    )
     if not booking:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Booking not found"
         )
-    
     return booking
 
 
 @router.patch("/{booking_id}/cancel", response_model=BookingResponse)
 async def cancel_booking(
     booking_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
     """Cancel booking (set status to CANCELLED)"""
-    
-    booking = booking_repo.update_status(booking_id, BookingStatus.CANCELLED)
+    booking = booking_repo.get_by_id(booking_id)
     if not booking:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Booking not found"
         )
-    
-    return booking
+    if current_user.role == UserRole.TOURIST and booking.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot cancel another user's booking")
+
+    changed_by = ChangedByType.ADMIN if current_user.role == UserRole.ADMIN else ChangedByType.USER
+    return booking_repo.update_status(
+        booking_id,
+        BookingStatus.CANCELLED,
+        changed_by_type=changed_by,
+        changed_by_user_id=current_user.id
+    )
 
 
 @router.patch("/{booking_id}/complete", response_model=BookingResponse)
 async def complete_booking(
     booking_id: UUID,
+    current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.VENDOR])),
     db: Session = Depends(get_db),
     booking_repo: BookingRepository = Depends(get_booking_repository)
 ):
     """Complete booking (set status to COMPLETED)"""
-    
-    booking = booking_repo.update_status(booking_id, BookingStatus.COMPLETED)
+    changed_by = ChangedByType.ADMIN if current_user.role == UserRole.ADMIN else ChangedByType.USER
+    booking = booking_repo.update_status(
+        booking_id,
+        BookingStatus.COMPLETED,
+        changed_by_type=changed_by,
+        changed_by_user_id=current_user.id
+    )
     if not booking:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Booking not found"
         )
-    
     return booking
+
 
 
 @router.get("/status/{status}", response_model=List[BookingResponse])

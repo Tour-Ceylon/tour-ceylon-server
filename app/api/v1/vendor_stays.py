@@ -70,15 +70,26 @@ def is_admin_user(user: User) -> bool:
 
 
 def ensure_property_access(current_user: User, repo: StayRepository, property_id: UUID):
-    property_record = repo.get_by_id(property_id) if is_admin_user(current_user) else repo.get_for_vendor(current_user.id, property_id)
-    if property_record is None:
-        if is_admin_user(current_user):
+    if is_admin_user(current_user):
+        property_record = repo.get_by_id(property_id)
+        if property_record is None:
             from app.models.listing import Listing
             listing = repo.db.query(Listing).filter(Listing.id == property_id).first()
             if listing:
                 property_record = repo.create_from_listing(listing.vendor_id, property_id)
-        else:
-            property_record = repo.create_from_listing(current_user.id, property_id)
+    else:
+        property_record = repo.get_for_vendor(current_user.id, property_id)
+        if property_record is None:
+            # Check if listing exists and belongs to this vendor before adopting
+            from app.models.listing import Listing
+            listing = repo.db.query(Listing).filter(Listing.id == property_id).first()
+            if listing:
+                if listing.vendor_id != current_user.id:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Not authorized to manage this stay property",
+                    )
+                property_record = repo.create_from_listing(current_user.id, property_id)
             
     if property_record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stay property not found")

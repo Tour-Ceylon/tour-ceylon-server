@@ -6,7 +6,7 @@ import math
 import logging
 import time
 
-from app.api.deps import get_current_user, get_current_user_with_sync
+from app.api.deps import get_current_user, get_current_user_with_sync, require_role
 from app.config.database import get_db
 from app.repositories.user_repo import UserRepository
 from app.schemas.user_schema import (
@@ -43,6 +43,21 @@ async def create_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User with this email already exists"
         )
+    
+    # Prevent self-assignment of ADMIN or unauthorized promotion via public registration
+    role_str = str(user_data.role.value if hasattr(user_data.role, "value") else user_data.role).upper()
+    if role_str == UserRole.ADMIN.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin accounts cannot be created via public registration",
+        )
+    
+    # If registering as vendor or driver, enforce pending status
+    if role_str in {UserRole.VENDOR.value, UserRole.DRIVER.value}:
+        user_data.vendor_status = "pending"
+    else:
+        user_data.role = UserRole.TOURIST
+        user_data.vendor_status = None
     
     try:
         user = user_repo.create(user_data)
@@ -128,9 +143,16 @@ async def apply_vendor(
 async def get_user(
     user_id: UUID,
     db: Session = Depends(get_db),
-    user_repo: UserRepository = Depends(get_user_repository)
+    user_repo: UserRepository = Depends(get_user_repository),
+    current_user: User = Depends(get_current_user),
 ):
-    """Get user by ID"""
+    """Get user by ID. Requires ADMIN role or user requesting their own profile."""
+    role_str = str(current_user.role.value if hasattr(current_user.role, "value") else current_user.role).upper()
+    if role_str != UserRole.ADMIN.value and current_user.id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Cannot view another user's profile",
+        )
     
     user = user_repo.get_by_id(user_id)
     if not user:
@@ -146,9 +168,10 @@ async def get_user(
 async def get_user_by_email(
     email: str,
     db: Session = Depends(get_db),
-    user_repo: UserRepository = Depends(get_user_repository)
+    user_repo: UserRepository = Depends(get_user_repository),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
 ):
-    """Get user by email"""
+    """Get user by email (Admin only)"""
     
     user = user_repo.get_by_email(email)
     if not user:
@@ -166,9 +189,10 @@ async def get_users(
     limit: int = Query(20, ge=1, le=100),
     is_active: bool = Query(None),
     db: Session = Depends(get_db),
-    user_repo: UserRepository = Depends(get_user_repository)
+    user_repo: UserRepository = Depends(get_user_repository),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
 ):
-    """Get all users with pagination"""
+    """Get all users with pagination (Admin only)"""
     started_at = time.perf_counter()
     users = user_repo.get_all(skip=skip, limit=limit, is_active=is_active)
     total = user_repo.count_all(is_active=is_active)
@@ -196,9 +220,10 @@ async def get_users(
 async def search_users(
     search_params: UserSearchParams,
     db: Session = Depends(get_db),
-    user_repo: UserRepository = Depends(get_user_repository)
+    user_repo: UserRepository = Depends(get_user_repository),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
 ):
-    """Search users with filters"""
+    """Search users with filters (Admin only)"""
     started_at = time.perf_counter()
     users, total_count = user_repo.search(search_params)
 
@@ -229,9 +254,10 @@ async def update_user(
     user_id: UUID,
     user_data: UserUpdate,
     db: Session = Depends(get_db),
-    user_repo: UserRepository = Depends(get_user_repository)
+    user_repo: UserRepository = Depends(get_user_repository),
+    current_user: User = Depends(get_current_user),
 ):
-    """Update user by ID"""
+    """Update user by ID. Only ADMINs can change role, vendor_status, and approved_categories."""
     
     # Check if user exists
     existing_user = user_repo.get_by_id(user_id)
@@ -240,6 +266,22 @@ async def update_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
+    
+    role_str = str(current_user.role.value if hasattr(current_user.role, "value") else current_user.role).upper()
+    is_admin = role_str == UserRole.ADMIN.value
+    
+    # Non-admins can only update their own profile and cannot touch role/vendor_status
+    if not is_admin:
+        if current_user.id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: Cannot update another user's profile",
+            )
+        if user_data.role is not None or user_data.vendor_status is not None or user_data.approved_categories is not None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: Only administrators can modify roles or approval status",
+            )
     
     # Check if email is being updated and already exists
     if user_data.email and user_repo.exists_by_email(user_data.email, exclude_user_id=user_id):
@@ -271,9 +313,10 @@ async def update_user(
 async def delete_user(
     user_id: UUID,
     db: Session = Depends(get_db),
-    user_repo: UserRepository = Depends(get_user_repository)
+    user_repo: UserRepository = Depends(get_user_repository),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
 ):
-    """Delete user by ID (hard delete)"""
+    """Delete user by ID (hard delete - Admin only)"""
     
     success = user_repo.delete(user_id)
     if not success:
@@ -287,9 +330,10 @@ async def delete_user(
 async def deactivate_user(
     user_id: UUID,
     db: Session = Depends(get_db),
-    user_repo: UserRepository = Depends(get_user_repository)
+    user_repo: UserRepository = Depends(get_user_repository),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
 ):
-    """Deactivate user (soft delete)"""
+    """Deactivate user (soft delete - Admin only)"""
     
     user = user_repo.soft_delete(user_id)
     if not user:
@@ -305,9 +349,10 @@ async def deactivate_user(
 async def activate_user(
     user_id: UUID,
     db: Session = Depends(get_db),
-    user_repo: UserRepository = Depends(get_user_repository)
+    user_repo: UserRepository = Depends(get_user_repository),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
 ):
-    """Activate user"""
+    """Activate user (Admin only)"""
     
     user = user_repo.activate(user_id)
     if not user:
@@ -323,9 +368,10 @@ async def activate_user(
 async def get_users_by_role(
     role: UserRole,
     db: Session = Depends(get_db),
-    user_repo: UserRepository = Depends(get_user_repository)
+    user_repo: UserRepository = Depends(get_user_repository),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
 ):
-    """Get all users by role"""
+    """Get all users by role (Admin only)"""
     
     users = user_repo.get_by_role(role)
     return users
@@ -335,9 +381,10 @@ async def get_users_by_role(
 async def get_users_by_country(
     country: str,
     db: Session = Depends(get_db),
-    user_repo: UserRepository = Depends(get_user_repository)
+    user_repo: UserRepository = Depends(get_user_repository),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
 ):
-    """Get all users by country"""
+    """Get all users by country (Admin only)"""
     
     users = user_repo.get_by_country(country)
     return users
@@ -346,9 +393,10 @@ async def get_users_by_country(
 @router.get("/stats/roles")
 async def get_user_role_stats(
     db: Session = Depends(get_db),
-    user_repo: UserRepository = Depends(get_user_repository)
+    user_repo: UserRepository = Depends(get_user_repository),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
 ):
-    """Get user count statistics by role"""
+    """Get user count statistics by role (Admin only)"""
     
     role_counts = user_repo.count_by_role()
     active_count = user_repo.count_active_users()
@@ -376,6 +424,7 @@ async def upload_vendor_documents(
     files: List[UploadFile] = File(...),
     db: Session = Depends(get_db),
     user_repo: UserRepository = Depends(get_user_repository),
+    current_user: User = Depends(get_current_user),
 ):
     """Upload one or more business verification documents for a vendor user.
 
@@ -386,6 +435,14 @@ async def upload_vendor_documents(
     from datetime import datetime, timezone
     from app.integrations.cloudinary import upload_document, delete_document, CloudinaryIntegrationError
     from app.config.settings import settings
+
+    # Ensure caller is the vendor themself or an admin
+    role_str = str(current_user.role.value if hasattr(current_user.role, "value") else current_user.role).upper()
+    if role_str != UserRole.ADMIN.value and current_user.id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Cannot upload documents for another user",
+        )
 
     # Load user
     user = user_repo.get_by_id(user_id)

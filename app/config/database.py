@@ -15,13 +15,12 @@ ENV_PATH = ROOT_DIR / ".env"
 load_dotenv(ENV_PATH)
 
 dotenv_values_map = dotenv_values(ENV_PATH)
-database_url = os.getenv("DATABASE_URL")
 
-# Keep explicit SQLite overrides for tests, but prefer the project .env for the app.
-if not database_url or not database_url.startswith("sqlite"):
-    database_url = dotenv_values_map.get("DATABASE_URL") or database_url
-    if database_url:
-        os.environ["DATABASE_URL"] = database_url
+# Real environment variables take precedence over .env file (SRV-OPS-02)
+database_url = os.getenv("DATABASE_URL") or dotenv_values_map.get("DATABASE_URL")
+if database_url:
+    os.environ["DATABASE_URL"] = database_url
+
 
 # Get database URL from environment variables
 DATABASE_URL = database_url

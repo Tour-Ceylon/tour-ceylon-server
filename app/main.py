@@ -29,6 +29,29 @@ app = FastAPI(title="Travel Ready Tours")
 app.add_exception_handler(AdminAPIError, admin_api_error_handler)
 
 
+@app.get("/")
+def root():
+    return {"name": "Travel Ready Tours API", "status": "running", "version": "1.0.0"}
+
+
+@app.get("/health")
+def health_check():
+    """Live health check verifying database connectivity (SRV-OPS-05)"""
+    from sqlalchemy import text
+    db_status = "connected"
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+    return {
+        "status": "healthy" if db_status == "connected" else "degraded",
+        "database": db_status,
+        "environment": settings.ENV,
+    }
+
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logging.error(

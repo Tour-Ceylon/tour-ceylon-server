@@ -2,11 +2,17 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, status
 
+from app.api.deps import require_role
 from app.api.v1.admin.dependencies import get_admin_service
+from app.models.enum import UserRole
 from app.schemas.admin.addons import AddOnCreate, AddOnResponse
 from app.services.admin.dashboard_service import AdminDashboardService
 
-router = APIRouter(prefix="/addons", tags=["admin-addons"])
+router = APIRouter(
+    prefix="/addons",
+    tags=["admin-addons"],
+    dependencies=[Depends(require_role([UserRole.ADMIN]))],
+)
 
 
 @router.post("", response_model=AddOnResponse, status_code=status.HTTP_201_CREATED)

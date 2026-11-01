@@ -36,6 +36,9 @@ def send_inquiry_notification_email(inquiry: BookingInquiryDetailed):
             logger.info(f"Business notification email sent for {inquiry.reference}")
         else:
             logger.error(f"Failed to send business notification email for {inquiry.reference}")
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         logger.error(f"Error sending business notification email: {str(e)}")
 
@@ -48,6 +51,9 @@ def send_customer_confirmation_email(inquiry: BookingInquiryDetailed):
             logger.info(f"Customer confirmation email sent for {inquiry.reference} to {inquiry.email}")
         else:
             logger.error(f"Failed to send customer confirmation email for {inquiry.reference}")
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         logger.error(f"Error sending customer confirmation email: {str(e)}")
 
@@ -137,6 +143,9 @@ async def create_booking_inquiry(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         logger.error(f"Error creating booking inquiry: {str(e)}")
         db.rollback()
@@ -166,6 +175,9 @@ def get_booking_inquiry(
         
     except HTTPException:
         raise
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         logger.error(f"Error retrieving booking inquiry {inquiry_id}: {str(e)}")
         raise HTTPException(
@@ -193,6 +205,9 @@ def get_booking_inquiry_by_reference(
         return inquiry
         
     except HTTPException:
+        raise
+    except HTTPException:
+        db.rollback()
         raise
     except Exception as e:
         logger.error(f"Error retrieving booking inquiry by reference {reference}: {str(e)}")
@@ -226,6 +241,9 @@ def search_booking_inquiries(
         result = service.search_inquiries(search_params)
         return result
         
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         logger.error(f"Error searching booking inquiries: {str(e)}")
         raise HTTPException(
@@ -245,6 +263,9 @@ def get_inquiries_by_email(
         inquiries = service.get_inquiries_by_email(email)
         return inquiries
         
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         logger.error(f"Error retrieving inquiries for email {email}: {str(e)}")
         raise HTTPException(
@@ -273,6 +294,9 @@ def update_booking_inquiry(
         return inquiry
         
     except HTTPException:
+        raise
+    except HTTPException:
+        db.rollback()
         raise
     except Exception as e:
         logger.error(f"Error updating booking inquiry {inquiry_id}: {str(e)}")
@@ -308,6 +332,9 @@ def update_inquiry_status(
         
     except HTTPException:
         raise
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         logger.error(f"Error updating inquiry status {inquiry_id}: {str(e)}")
         raise HTTPException(
@@ -334,6 +361,9 @@ def delete_booking_inquiry(
             
     except HTTPException:
         raise
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         logger.error(f"Error deleting booking inquiry {inquiry_id}: {str(e)}")
         raise HTTPException(
@@ -353,6 +383,9 @@ def get_inquiries_by_status(
         inquiries = service.get_inquiries_by_status(status)
         return inquiries
         
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         logger.error(f"Error retrieving inquiries by status {status}: {str(e)}")
         raise HTTPException(
@@ -369,6 +402,9 @@ def get_inquiry_statistics(db: Session = Depends(get_db)):
         stats = service.get_inquiry_statistics()
         return stats
         
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         logger.error(f"Error retrieving inquiry statistics: {str(e)}")
         raise HTTPException(

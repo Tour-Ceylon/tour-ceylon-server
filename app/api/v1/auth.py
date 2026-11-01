@@ -250,9 +250,20 @@ async def get_me(
 
 
 @router.get("/health")
-async def auth_health():
-    """Health check for auth service"""
-    return {"status": "healthy", "service": "auth"}
+async def auth_health(db: Session = Depends(get_db)):
+    """Health check for auth and database connectivity (SRV-OPS-05)"""
+    from sqlalchemy import text
+    try:
+        db.execute(text("SELECT 1"))
+        db_ok = True
+    except Exception:
+        db_ok = False
+    return {
+        "status": "healthy" if db_ok else "degraded",
+        "service": "auth",
+        "database": "connected" if db_ok else "unreachable"
+    }
+
 
 # ---------------------------------------------------------------------------
 # Allowed MIME types / max size for document uploads
