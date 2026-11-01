@@ -36,11 +36,71 @@ The amount and currency always come from the stored booking. A client-supplied a
 
 Guests: transport bookings are created without sign-in, so checkout and status accept the booking reference and customer email as proof of ownership. A signed-in owner (matching `user_id`) or an admin also works.
 
+## Stays: approve, then pay
+
+Stays are not charged at checkout. The guest sends a request, the team confirms the rooms, and the guest then receives an email with the confirmed price and a secure link to pay on PayHere. Transfers and cart items other than stays still use "Pay Online Now" at checkout.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Guest
+    participant Site as Customer site
+    participant API as Server
+    actor Team as Admin / vendor portal
+    participant PH as PayHere
+
+    Guest->>Site: Choose rooms and dates, send booking request
+    Site->>API: Create booking request
+    API->>API: Hold the rooms (pending)
+    API-->>Team: Email: new booking request
+    Team->>API: Review availability, press Accept and Confirm
+    API->>API: Confirm the held rooms
+    API->>API: Price the stay from database prices (rooms x nights + 12% tax)
+    API-->>Guest: Email: stay confirmed, total, Pay now link (valid 72 hours)
+    Guest->>Site: Open /pay/code
+    Site->>API: Get the stay summary and price
+    API-->>Site: Summary, or paid / cancelled / expired
+    Guest->>Site: Press Pay now
+    Site->>API: Start checkout from the link
+    API-->>Site: Signed PayHere form
+    Site->>PH: Guest is sent to PayHere and enters the card there
+    PH->>API: Signed notification (server to server)
+    API->>API: Verify signature, amount and currency, mark payment succeeded
+    API->>API: Mark the booking paid (online)
+    API-->>Guest: Email: payment received
+    API-->>Team: Email: paid online
+    PH-->>Site: Guest returns to /payment/return
+    Site->>API: Poll payment status
+    API-->>Site: Payment received
+```
+
+What each state of the pay page means:
+
+| State | Meaning |
+|---|---|
+| ready | Approved, unpaid, price verified. The Pay now button is shown. |
+| not_approved | The team has not confirmed the rooms yet. |
+| paid | A payment for this request already succeeded. |
+| cancelled | The request was cancelled; the rooms were released. |
+| unavailable | The server cannot verify the price, so the guest is asked to contact you. |
+| (HTTP 410) | The link expired. Use **Send payment link** in the portal to issue a new one. |
+
+Rules:
+- The amount is always rebuilt on the server. The emailed link only identifies the request; it cannot change the price.
+- A stay request cannot be paid online (by link or at checkout) until its status is approved (`quoted` or `converted_to_booking`).
+- The link is a signed code (HS256, `SECRET_KEY`) that expires after `PAYMENT_LINK_TTL_HOURS` (default 72). It contains no personal data.
+- Rooms stay held while the guest decides. Nothing releases them automatically when a link expires; the team cancels the request to release them.
+- The approval email is sent whichever route the team uses (the vendor or admin portal, or the stay booking screen). Re-approving does not send a second email; use **Send payment link** instead.
+- After a successful payment the booking created at approval gets `payment_status = succeeded` and `payment_method = online`. A chargeback marks it `refunded`.
+- Portal: `POST /api/v1/vendor/booking-inquiries/{id}/payment-link` (admin or the owning vendor) sends a fresh link, and the inquiry list now carries `paymentStatus`.
+
 ## Environment variables
 
 | Variable | Meaning |
 |---|---|
 | `PAYMENT_PROVIDER` | `payhere`, or empty to disable online payments |
+| `SECRET_KEY` | Signs emailed payment links; must be a long random value in production |
+| `PAYMENT_LINK_TTL_HOURS` | How long a payment link works (default 72) |
 | `PAYHERE_MODE` | `sandbox` or `live` |
 | `PAYHERE_MERCHANT_ID` / `PAYHERE_MERCHANT_SECRET` | From PayHere, per registered domain |
 | `PUBLIC_API_URL` | Public https base URL of this server; builds `notify_url` |

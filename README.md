@@ -53,6 +53,8 @@ nano .env
 
 Fill in `.env`. For a production server set at least:
 - `DATABASE_URL`, the Clerk and Supabase keys, SMTP, Cloudinary and map keys.
+- `SECRET_KEY`: a long random value (`openssl rand -hex 32`). The server refuses to start with online payments in production while it is left at the default, because it signs the emailed payment links.
+- `CLIENT_APP_URL`: the address of the **customer** site. Payment links in emails open `<CLIENT_APP_URL>/pay/<code>`.
 - `PUBLIC_API_URL=https://api.example.com`, the public address from step 3.
 - `PAYHERE_MODE=live` and live PayHere credentials only after going live (see [docs/PAYMENTS.md](docs/PAYMENTS.md)). Use `sandbox` until then.
 - `CLIENT_RETURN_URL` and `CLIENT_CANCEL_URL`: the live customer-site pages (`/payment/return` and `/payment/cancel`).
