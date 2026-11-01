@@ -7,6 +7,8 @@ from typing import Mapping, Optional
 
 from sqlalchemy.orm import Session
 
+from app.models.bookingInquiry import BookingInquiry
+from app.models.enum import InquiryStatus
 from app.models.transportBooking import TransportBooking
 from app.models.user import User
 from app.payments.base import (
@@ -17,18 +19,13 @@ from app.payments.base import (
     PaymentProviderError,
 )
 from app.payments.constants import FINAL_STATUSES, PaymentStatus, TargetType
+from app.payments.errors import PaymentError
+from app.payments import pricing
 from app.payments.models import Payment
 from app.payments.registry import get_provider
 from app.payments.repository import PaymentRepository
 
 logger = logging.getLogger("app.payments")
-
-
-class PaymentError(Exception):
-    def __init__(self, status_code: int, detail: str):
-        super().__init__(detail)
-        self.status_code = status_code
-        self.detail = detail
 
 
 @dataclass
@@ -41,6 +38,7 @@ class PaidNotice:
     amount: Decimal
     currency: str
     order_id: str
+    kind: str = TargetType.TRANSPORT_BOOKING.value
 
 
 @dataclass
@@ -86,8 +84,14 @@ class TransportBookingTarget:
             return f"This booking is {booking.booking_status} and cannot be paid."
         return None
 
-    def amount_and_currency(self, booking: TransportBooking):
+    def amount_and_currency(self, booking: TransportBooking, db: Session):
         return _two_dp(booking.total_price), (booking.currency or "").upper()
+
+    def customer_name(self, booking: TransportBooking) -> str:
+        return booking.customer_name
+
+    def customer_email(self, booking: TransportBooking) -> str:
+        return booking.customer_email
 
     def description(self, booking: TransportBooking) -> str:
         text = f"Transfer {booking.booking_reference}: {booking.pickup_location} to {booking.destination_location}"
@@ -118,7 +122,76 @@ class TransportBookingTarget:
         # pending / failed / cancelled leave the booking unpaid so the customer can retry.
 
 
-_TARGETS = {TransportBookingTarget.target_type: TransportBookingTarget()}
+class BookingInquiryTarget:
+    """Cart checkout (stays, packages, safaris, experiences) paid online.
+
+    The amount is rebuilt from database prices; the inquiry's own stored total
+    is browser-supplied and is never charged.
+    """
+
+    target_type = TargetType.BOOKING_INQUIRY.value
+
+    def load(self, db: Session, target_id) -> Optional[BookingInquiry]:
+        return db.get(BookingInquiry, target_id)
+
+    def authorize(
+        self,
+        inquiry: BookingInquiry,
+        user: Optional[User],
+        reference: Optional[str],
+        email: Optional[str],
+    ) -> bool:
+        # Inquiries are created without sign-in, so reference + email is the proof.
+        if not (reference and email):
+            return False
+        return (
+            reference.strip().upper() == (inquiry.reference or "").upper()
+            and email.strip().lower() == (inquiry.email or "").strip().lower()
+        )
+
+    def not_payable_reason(self, inquiry: BookingInquiry) -> Optional[str]:
+        if inquiry.status == InquiryStatus.CANCELLED:
+            return "This booking request was cancelled and cannot be paid."
+        return None
+
+    def amount_and_currency(self, inquiry: BookingInquiry, db: Session):
+        priced = pricing.price_cart(db, inquiry.cart_items)
+        return priced.amount, priced.currency
+
+    def description(self, inquiry: BookingInquiry) -> str:
+        titles = [str(i.get("title") or "") for i in (inquiry.cart_items or []) if isinstance(i, dict)]
+        text = f"Booking {inquiry.reference}: " + ", ".join(t for t in titles if t)
+        return text[:120]
+
+    def customer(self, inquiry: BookingInquiry) -> CheckoutCustomer:
+        return CheckoutCustomer(
+            first_name=inquiry.first_name or "Customer",
+            last_name=inquiry.last_name or "-",
+            email=inquiry.email,
+            phone=inquiry.phone or "",
+            address="N/A",
+            city="N/A",
+            country=inquiry.nationality or "Sri Lanka",
+        )
+
+    def reference(self, inquiry: BookingInquiry) -> str:
+        return inquiry.reference
+
+    def customer_name(self, inquiry: BookingInquiry) -> str:
+        return f"{inquiry.first_name} {inquiry.last_name}".strip()
+
+    def customer_email(self, inquiry: BookingInquiry) -> str:
+        return inquiry.email
+
+    def apply_status(self, inquiry: BookingInquiry, status: PaymentStatus) -> None:
+        # The inquiry keeps its own workflow status; "paid" is read from the payments table.
+        return None
+
+
+_TARGETS = {
+    TransportBookingTarget.target_type: TransportBookingTarget(),
+    BookingInquiryTarget.target_type: BookingInquiryTarget(),
+}
 
 
 def _get_target(target_type: str):
@@ -136,6 +209,7 @@ def initiate_checkout(
     user: Optional[User],
     booking_reference: Optional[str],
     customer_email: Optional[str],
+    expected_amount: Optional[Decimal] = None,
 ) -> tuple[Payment, CheckoutInstructions]:
     try:
         provider = get_provider()
@@ -155,7 +229,9 @@ def initiate_checkout(
     if reason:
         raise PaymentError(409, reason)
 
-    amount, currency = target.amount_and_currency(obj)
+    amount, currency = target.amount_and_currency(obj, db)
+    if expected_amount is not None and abs(_two_dp(expected_amount) - amount) > pricing.TOLERANCE:
+        raise PaymentError(409, "The price has changed. Please review your booking and try again.")
     order_id = f"TRT-{target.reference(obj)}-{uuid.uuid4().hex[:8]}"[:64]
     payment = repo.create(
         target_type=target_type,
@@ -263,11 +339,12 @@ def handle_notification(
     if new == PaymentStatus.SUCCEEDED and obj is not None:
         notice = PaidNotice(
             booking_reference=target.reference(obj),
-            customer_name=obj.customer_name,
-            customer_email=obj.customer_email,
+            customer_name=target.customer_name(obj),
+            customer_email=target.customer_email(obj),
             amount=_two_dp(payment.amount),
             currency=payment.currency,
             order_id=payment.order_id,
+            kind=payment.target_type,
         )
     return NotifyResult(200, "ok", notice)
 
@@ -288,6 +365,6 @@ def can_view_payment(
     obj = target.load(db, payment.target_id) if target else None
     if obj is None:
         return False
-    if user is not None and obj.user_id is not None and obj.user_id == user.id:
+    if user is not None and getattr(obj, "user_id", None) is not None and obj.user_id == user.id:
         return True
-    return bool(email) and email.strip().lower() == (obj.customer_email or "").strip().lower()
+    return bool(email) and email.strip().lower() == (target.customer_email(obj) or "").strip().lower()

@@ -20,6 +20,11 @@ from app.config.database import get_db
 from app.config.settings import settings
 from app.integrations.email_provider import email_provider
 from app.models.base import Base
+from app.models.bookingInquiry import BookingInquiry
+from app.models.enum import BookingUnit, CurrencyCode, InquiryStatus, ListingStatus, ListingType, PricingRuleType
+from app.models.listing import Listing
+from app.models.listingVariant import ListingVariant
+from app.models.pricingRule import PricingRule
 from app.models.transportBooking import TransportBooking
 from app.payments.models import Payment, PaymentEvent
 from app.payments.providers.payhere import PayHereProvider
@@ -42,7 +47,10 @@ def _array(_t, _c, **_kw):
     return "JSON"
 
 
-TABLES = ("users", "vehicle_categories", "transport_bookings", "payments", "payment_events")
+TABLES = (
+    "users", "vehicle_categories", "transport_bookings", "payments", "payment_events",
+    "booking_inquiries", "listings", "listing_variants", "pricing_rules",
+)
 MERCHANT_ID = "1239021"
 SECRET = "testsecret"
 OWNER_ID = uuid4()
@@ -345,3 +353,103 @@ def test_status_endpoint_for_admin(client, session_factory, current_user):
     data = start_checkout(client, booking)
     current_user["user"] = SimpleNamespace(id=uuid4(), role="ADMIN")
     assert client.get(f"/api/v1/payments/{data['payment_id']}/status").status_code == 200
+
+
+# ---- cart inquiries (stays, packages, safaris, experiences) -------------------------------
+
+def make_inquiry(session_factory, price=100.0, listing_price=100.0, total=1.0, status=InquiryStatus.PENDING_CONTACT):
+    """An inquiry whose stored total is deliberately wrong; only database prices may be charged."""
+    with session_factory() as db:
+        listing = Listing(
+            destination_id=uuid4(), listing_type=ListingType.SAFARI, title="Yala safari",
+            status=ListingStatus.PUBLISHED, base_currency=CurrencyCode.USD,
+        )
+        db.add(listing)
+        db.flush()
+        variant = ListingVariant(listing_id=listing.id, name="Morning", booking_unit=BookingUnit.PER_GROUP)
+        db.add(variant)
+        db.flush()
+        db.add(PricingRule(
+            variant_id=variant.id, pricing_rule_type=PricingRuleType.FIXED, min_guest=1, max_guest=8,
+            amount=listing_price, currency=CurrencyCode.USD, priority=1,
+        ))
+        inquiry = BookingInquiry(
+            reference="INQ-TEST0001", first_name="Ada", last_name="Lovelace", email="ada@example.com",
+            phone="0771234567", nationality="UK", number_of_travelers=2, subtotal=total, total=total,
+            currency=CurrencyCode.USD, status=status,
+            cart_items=[{
+                "listing_id": str(listing.id), "title": "Yala safari", "travel_date": "2027-03-01T09:00:00",
+                "travel_count": 1, "price": price, "base_currency": "USD",
+            }],
+        )
+        db.add(inquiry)
+        db.commit()
+        db.refresh(inquiry)
+        return SimpleNamespace(id=inquiry.id, reference=inquiry.reference, email=inquiry.email)
+
+
+def inquiry_body(inquiry, **overrides):
+    body = {
+        "target_type": "booking_inquiry",
+        "target_id": str(inquiry.id),
+        "booking_reference": inquiry.reference,
+        "customer_email": inquiry.email,
+    }
+    body.update(overrides)
+    return body
+
+
+def test_inquiry_checkout_charges_database_price_not_stored_total(client, session_factory):
+    inquiry = make_inquiry(session_factory, price=100.0, listing_price=100.0, total=1.0)
+    res = client.post("/api/v1/payments/checkout", json=inquiry_body(inquiry))
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert data["fields"]["amount"] == "112.00"  # 100.00 + 12% tax; the inquiry's own total was 1.00
+    assert Decimal(str(data["amount"])) == Decimal("112.00") and data["currency"] == "USD"
+
+
+def test_inquiry_checkout_rejects_cheaper_cart_price(client, session_factory):
+    inquiry = make_inquiry(session_factory, price=10.0, listing_price=100.0)
+    res = client.post("/api/v1/payments/checkout", json=inquiry_body(inquiry))
+    assert res.status_code == 409
+
+
+def test_inquiry_checkout_rejects_changed_expected_amount(client, session_factory):
+    inquiry = make_inquiry(session_factory)
+    assert client.post("/api/v1/payments/checkout", json=inquiry_body(inquiry, expected_amount="50.00")).status_code == 409
+    assert client.post("/api/v1/payments/checkout", json=inquiry_body(inquiry, expected_amount="112.00")).status_code == 200
+
+
+def test_inquiry_checkout_needs_reference_and_email(client, session_factory):
+    inquiry = make_inquiry(session_factory)
+    assert client.post("/api/v1/payments/checkout", json=inquiry_body(inquiry, customer_email="eve@example.com")).status_code == 404
+    assert client.post("/api/v1/payments/checkout", json=inquiry_body(inquiry, booking_reference="INQ-OTHER")).status_code == 404
+
+
+def test_cancelled_inquiry_cannot_be_paid(client, session_factory):
+    inquiry = make_inquiry(session_factory, status=InquiryStatus.CANCELLED)
+    assert client.post("/api/v1/payments/checkout", json=inquiry_body(inquiry)).status_code == 409
+
+
+def test_inquiry_payment_success_sends_receipt_and_team_alert_once(client, session_factory, monkeypatch):
+    receipts, alerts = [], []
+    monkeypatch.setattr(email_provider, "send_inquiry_payment_received", lambda n: receipts.append(n) or True)
+    monkeypatch.setattr(email_provider, "send_inquiry_payment_team_alert", lambda n: alerts.append(n) or True)
+    inquiry = make_inquiry(session_factory)
+    order_id = client.post("/api/v1/payments/checkout", json=inquiry_body(inquiry)).json()["order_id"]
+    body = signed_notification(order_id, amount="112.00")
+    assert notify(client, body).status_code == 200
+    assert notify(client, body).status_code == 200  # retry
+    assert len(receipts) == 1 and len(alerts) == 1
+    assert receipts[0].booking_reference == "INQ-TEST0001" and receipts[0].customer_name == "Ada Lovelace"
+    with session_factory() as db:
+        assert db.execute(select(Payment)).scalars().first().status == "succeeded"
+        assert db.get(BookingInquiry, inquiry.id).status == InquiryStatus.PENDING_CONTACT  # workflow untouched
+
+
+def test_inquiry_status_endpoint_for_guest(client, session_factory):
+    inquiry = make_inquiry(session_factory)
+    data = client.post("/api/v1/payments/checkout", json=inquiry_body(inquiry)).json()
+    url = f"/api/v1/payments/{data['payment_id']}/status"
+    assert client.get(url, params={"email": inquiry.email}).status_code == 200
+    assert client.get(url, params={"email": "eve@example.com"}).status_code == 404

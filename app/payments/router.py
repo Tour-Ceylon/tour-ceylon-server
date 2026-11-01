@@ -57,6 +57,7 @@ def create_checkout(
             user=user,
             booking_reference=body.booking_reference,
             customer_email=body.customer_email,
+            expected_amount=body.expected_amount,
         )
     except service.PaymentError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail)
@@ -67,12 +68,18 @@ def create_checkout(
         url=instructions.url,
         method=instructions.method,
         fields=instructions.fields,
+        amount=payment.amount,
+        currency=payment.currency,
     )
 
 
 def _send_payment_received_task(notice) -> None:
     try:
-        email_provider.send_transport_payment_received(notice)
+        if notice.kind == "booking_inquiry":
+            email_provider.send_inquiry_payment_received(notice)
+            email_provider.send_inquiry_payment_team_alert(notice)
+        else:
+            email_provider.send_transport_payment_received(notice)
     except Exception:  # an email problem must never affect the webhook
         logger.exception("Payment received email failed for %s", notice.booking_reference)
 

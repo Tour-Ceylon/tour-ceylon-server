@@ -23,3 +23,4 @@ FINAL_STATUSES = frozenset(
 
 class TargetType(str, Enum):
     TRANSPORT_BOOKING = "transport_booking"
+    BOOKING_INQUIRY = "booking_inquiry"

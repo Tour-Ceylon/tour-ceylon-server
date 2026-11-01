@@ -7,11 +7,13 @@ from pydantic import BaseModel, ConfigDict
 
 
 class CheckoutBody(BaseModel):
-    target_type: Literal["transport_booking"]
+    target_type: Literal["transport_booking", "booking_inquiry"]
     target_id: UUID
     # Guests prove ownership with the reference and email they booked with.
     booking_reference: Optional[str] = None
     customer_email: Optional[str] = None
+    # What the customer was shown; the server rejects the checkout if its own price differs.
+    expected_amount: Optional[Decimal] = None
 
 
 class CheckoutResponse(BaseModel):
@@ -20,6 +22,8 @@ class CheckoutResponse(BaseModel):
     url: str
     method: str
     fields: Dict[str, str]
+    amount: Decimal
+    currency: str
 
 
 class PaymentStatusResponse(BaseModel):
