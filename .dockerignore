@@ -1,0 +1,26 @@
+# Never bake secrets, the local venv or VCS data into the image
+.env
+.env.*
+!.env.example
+venv/
+.venv/
+.git/
+.gitignore
+logs/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.vscode/
+.idea/
+.claude/
+
+# Docs, one-off scripts and tests are not needed at runtime
+*.md
+docs/
+app/tests/
+test_*.py
+check_*.py
+inspect_*.py
+scratch_*.py
+docker-compose.yml
