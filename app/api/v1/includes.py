@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 from app.config.database import get_db
 from app.repositories.include_repo import ListingIncludeRepository
 from app.schemas.include_schema import ListingIncludeCreate, ListingIncludeResponse
+from app.api.deps import require_role
+from app.models.enum import UserRole
 
 router = APIRouter()
 
@@ -15,7 +17,7 @@ def get_include_repository(db: Session = Depends(get_db)) -> ListingIncludeRepos
     return ListingIncludeRepository(db)
 
 
-@router.post("/", response_model=ListingIncludeResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", dependencies=[Depends(require_role([UserRole.ADMIN]))], response_model=ListingIncludeResponse, status_code=status.HTTP_201_CREATED)
 async def create_listing_include(
     include_data: ListingIncludeCreate,
     include_repo: ListingIncludeRepository = Depends(get_include_repository)
@@ -41,7 +43,7 @@ async def get_includes_by_listing(
     return includes
 
 
-@router.delete("/listing/{listing_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/listing/{listing_id}", dependencies=[Depends(require_role([UserRole.ADMIN]))], status_code=status.HTTP_204_NO_CONTENT)
 async def delete_includes_by_listing(
     listing_id: UUID,
     include_repo: ListingIncludeRepository = Depends(get_include_repository)

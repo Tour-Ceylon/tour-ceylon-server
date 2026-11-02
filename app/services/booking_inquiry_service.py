@@ -46,7 +46,7 @@ class BookingInquiryService:
             except Exception as auto_ex:
                 logger.error(f"Error auto-provisioning stay booking on inquiry creation: {auto_ex}")
             
-            logger.info(f"Created booking inquiry {db_inquiry.reference} for {db_inquiry.email} (Pending Vendor Review)")
+            logger.info(f"Created booking inquiry {db_inquiry.reference} (Pending Vendor Review)")
 
             # Auto-provision a TransportBooking if cart contains a transfer item
             try:
@@ -99,7 +99,7 @@ class BookingInquiryService:
             return [self._convert_to_detailed_response(inquiry) for inquiry in db_inquiries]
             
         except Exception as e:
-            logger.error(f"Error retrieving inquiries for email {email}: {str(e)}")
+            logger.error(f"Error retrieving inquiries by email: {str(e)}")
             raise
 
     def search_inquiries(self, search_params: BookingInquirySearchParams) -> BookingInquiryListResponse:

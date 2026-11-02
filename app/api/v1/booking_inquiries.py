@@ -49,7 +49,7 @@ def send_customer_confirmation_email(inquiry: BookingInquiryDetailed):
     try:
         success = email_provider.send_booking_inquiry_customer_confirmation(inquiry)
         if success:
-            logger.info(f"Customer confirmation email sent for {inquiry.reference} to {inquiry.email}")
+            logger.info(f"Customer confirmation email sent for {inquiry.reference}")
         else:
             logger.error(f"Failed to send customer confirmation email for {inquiry.reference}")
     except HTTPException:
@@ -78,9 +78,13 @@ async def create_booking_inquiry(
     6. Returns inquiry confirmation response
     """
     try:
-        # Log the incoming request for debugging
+        # SEC-4: never log the request body (it contains name, email, phone). Log counts only.
         body = await request.body()
-        logger.info(f"Received booking inquiry request body: {body.decode('utf-8')}")
+        logger.info(
+            "Received booking inquiry request: cart_items=%d bytes=%d",
+            len(inquiry_data.cart_items),
+            len(body),
+        )
         
         # Preserve raw travel_date strings (e.g. "2026-09-16 to 2026-09-20") that
         # the Pydantic validator strips down to a single datetime.  The auto-provisioning
@@ -156,7 +160,7 @@ async def create_booking_inquiry(
         )
 
 
-@router.get("/{inquiry_id}", response_model=BookingInquiryDetailed)
+@router.get("/{inquiry_id}", dependencies=[Depends(require_role([UserRole.ADMIN]))], response_model=BookingInquiryDetailed)
 def get_booking_inquiry(
     inquiry_id: UUID,
     db: Session = Depends(get_db)
@@ -218,7 +222,7 @@ def get_booking_inquiry_by_reference(
         )
 
 
-@router.get("/", response_model=BookingInquiryListResponse)
+@router.get("/", dependencies=[Depends(require_role([UserRole.ADMIN]))], response_model=BookingInquiryListResponse)
 def search_booking_inquiries(
     email: str = None,
     status: InquiryStatus = None,
@@ -253,7 +257,7 @@ def search_booking_inquiries(
         )
 
 
-@router.get("/email/{email}", response_model=List[BookingInquiryDetailed])
+@router.get("/email/{email}", dependencies=[Depends(require_role([UserRole.ADMIN]))], response_model=List[BookingInquiryDetailed])
 def get_inquiries_by_email(
     email: str,
     db: Session = Depends(get_db)
@@ -268,14 +272,14 @@ def get_inquiries_by_email(
         db.rollback()
         raise
     except Exception as e:
-        logger.error(f"Error retrieving inquiries for email {email}: {str(e)}")
+        logger.error(f"Error retrieving inquiries by email: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve inquiries"
         )
 
 
-@router.put("/{inquiry_id}", response_model=BookingInquiryDetailed)
+@router.put("/{inquiry_id}", dependencies=[Depends(require_role([UserRole.ADMIN]))], response_model=BookingInquiryDetailed)
 def update_booking_inquiry(
     inquiry_id: UUID,
     inquiry_data: BookingInquiryUpdate,
@@ -355,7 +359,7 @@ def update_inquiry_status(
         )
 
 
-@router.delete("/{inquiry_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{inquiry_id}", dependencies=[Depends(require_role([UserRole.ADMIN]))], status_code=status.HTTP_204_NO_CONTENT)
 def delete_booking_inquiry(
     inquiry_id: UUID,
     db: Session = Depends(get_db)
@@ -384,7 +388,7 @@ def delete_booking_inquiry(
         )
 
 
-@router.get("/status/{status}", response_model=List[BookingInquiryDetailed])
+@router.get("/status/{status}", dependencies=[Depends(require_role([UserRole.ADMIN]))], response_model=List[BookingInquiryDetailed])
 def get_inquiries_by_status(
     status: InquiryStatus,
     db: Session = Depends(get_db)
@@ -406,7 +410,7 @@ def get_inquiries_by_status(
         )
 
 
-@router.get("/admin/statistics")
+@router.get("/admin/statistics", dependencies=[Depends(require_role([UserRole.ADMIN]))])
 def get_inquiry_statistics(db: Session = Depends(get_db)):
     """Get booking inquiry statistics (admin endpoint)"""
     try:
