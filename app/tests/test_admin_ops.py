@@ -15,8 +15,8 @@ from sqlalchemy.pool import StaticPool
 os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
 
 from app.api import deps
-from app.api.v1 import includes
-from app.api.v1.admin import addons, assignments, notifications, reviews
+from app.api.v1 import includes, vendor_booking_inquiries
+from app.api.v1.admin import addons, assignments, notifications, reviews, settings as admin_settings
 from app.config.database import get_db
 from app.models.base import Base
 from app.models.bookingInquiry import BookingInquiry
@@ -46,6 +46,8 @@ def _array(_t, _c, **_kw):
 TABLES = (
     "users", "listings", "booking_inquiries", "drivers", "inquiry_assignments",
     "listing_addons", "reviews", "client_notifications", "bookings",
+    "driver_luggage_capacity", "luggage_size_types", "vehicle_model_presets",
+    "stay_properties", "AdminSettings", "payments", "payment_events",
 )
 
 
@@ -75,6 +77,8 @@ def make_client(db, user):
     app.include_router(reviews.router, prefix="/admin")
     app.include_router(notifications.router, prefix="/admin")
     app.include_router(includes.router, prefix="/listing-addons")
+    app.include_router(vendor_booking_inquiries.router, prefix="/vendor/booking-inquiries")
+    app.include_router(admin_settings.router, prefix="/admin")
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[deps.get_current_user] = lambda: user
     return TestClient(app)
@@ -214,3 +218,90 @@ def test_assignment_rules(db, admin):
     assert client.post(url(make_inquiry(db, listing_id="transfer-sedan")), json={"assignee_type": "guide", "guide_name": "X"}).status_code == 409
     assert client.get(f"/admin/inquiries/{uuid4()}/assignments").status_code == 404
     assert client.delete(f"{url(inquiry)}/{uuid4()}").status_code == 404
+
+
+# ---- ERR-3: a driver decision is mirrored on the user so the pending screen can clear ----
+
+def test_driver_approval_updates_user_status(db):
+    from app.repositories.driver_repository import DriverRepository
+
+    driver = make_driver(db, status="pending_review")
+    driver.user.vendor_status = "pending"
+    db.commit()
+    repo = DriverRepository(db)
+
+    repo.update_driver_status(driver.id, "approved")
+    db.refresh(driver.user)
+    assert driver.user.vendor_status == "approved"
+
+    repo.update_driver_status(driver.id, "suspended")
+    db.refresh(driver.user)
+    assert driver.user.vendor_status == "suspended"
+
+
+# ---- UI-11: internal notes live on the server, staff only ----
+
+def test_internal_notes_roundtrip_and_permissions(db, admin):
+    inquiry = make_inquiry(db)
+    client = make_client(db, admin)
+    path = f"/vendor/booking-inquiries/{inquiry.id}/internal-notes"
+
+    assert client.get(path).json()["notes"] == ""
+    saved = client.put(path, json={"notes": "  Called the guest, wants a vegetarian menu  "})
+    assert saved.status_code == 200 and saved.json()["notes"] == "Called the guest, wants a vegetarian menu"
+    assert client.get(path).json()["notes"] == "Called the guest, wants a vegetarian menu"
+    assert client.put(path, json={"notes": "   "}).json()["notes"] == ""          # blank clears it
+    assert client.put(path, json={"notes": "x" * 5001}).status_code == 422
+    assert client.get(f"/vendor/booking-inquiries/{uuid4()}/internal-notes").status_code == 404
+
+    stranger = User(email="v@example.com", full_name="Other vendor", role=UserRole.VENDOR)
+    db.add(stranger)
+    db.commit()
+    assert make_client(db, stranger).get(path).status_code == 403                 # a vendor who does not own it
+
+
+def test_notes_never_reach_the_customer_views(db, admin):
+    from app.services.booking_inquiry_service import BookingInquiryService
+
+    inquiry = make_inquiry(db)
+    inquiry.internal_notes = "SECRET staff note"
+    db.commit()
+    service = BookingInquiryService(db)
+    assert "SECRET" not in service.get_public_view(inquiry.reference).model_dump_json()
+    assert "SECRET" not in service.get_inquiry_by_id(inquiry.id).model_dump_json()
+
+
+# ---- UI-11: the platform fee comes from settings ----
+
+def test_platform_fee_setting(db, admin):
+    client = make_client(db, admin)
+    assert client.get("/admin/settings").json()["platformFeePercent"] == 15.0      # the old hardcoded figure is the default
+    updated = client.patch("/admin/settings", json={"siteName": "TRT", "contactEmail": "a@b.com", "defaultCurrency": "USD", "platformFeePercent": 12.5})
+    assert updated.status_code == 200 and updated.json()["platformFeePercent"] == 12.5
+    # omitting the fee leaves it alone
+    kept = client.patch("/admin/settings", json={"siteName": "TRT2", "contactEmail": "a@b.com", "defaultCurrency": "USD"})
+    assert kept.json()["platformFeePercent"] == 12.5
+    assert client.patch("/admin/settings", json={"siteName": "x", "contactEmail": "a@b.com", "defaultCurrency": "USD", "platformFeePercent": 140}).status_code == 422
+
+
+# ---- FEAT-4: the real payments list and per-currency totals ----
+
+def test_payment_summary_never_mixes_currencies(db, admin):
+    from app.api.v1.admin import payments as admin_payments
+    from app.payments.models import Payment
+
+    for i, (amount, currency, status) in enumerate((("100.00", "USD", "succeeded"), ("50.50", "USD", "succeeded"),
+                                                    ("9000", "LKR", "succeeded"), ("70", "USD", "failed"))):
+        db.add(Payment(target_type="booking_inquiry", target_id=uuid4(), provider="payhere", order_id=f"ORD-{i}",
+                       amount=Decimal(amount), currency=currency, status=status))
+    db.commit()
+
+    app = FastAPI()
+    app.include_router(admin_payments.router, prefix="/admin")
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[deps.get_current_user] = lambda: admin
+    client = TestClient(app)
+
+    received = {r["currency"]: (float(r["total"]), r["count"]) for r in client.get("/admin/payments/summary").json()["received"]}
+    assert received == {"LKR": (9000.0, 1), "USD": (150.5, 2)}          # failed payment excluded, currencies kept apart
+    assert client.get("/admin/payments?status=failed").json()["total"] == 1

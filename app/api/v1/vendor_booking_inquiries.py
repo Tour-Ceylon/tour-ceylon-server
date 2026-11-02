@@ -292,3 +292,48 @@ def send_inquiry_payment_link(
         "expiresAt": offer.expires_at.isoformat(),
         "message": "Payment link emailed to the guest." if sent else "The email could not be sent. Copy the link and send it to the guest yourself.",
     }
+
+
+class InternalNotesBody(BaseModel):
+    notes: str = ""
+
+
+def _notes_response(inq: BookingInquiry) -> Dict[str, Any]:
+    return {
+        "id": str(inq.id),
+        "notes": inq.internal_notes or "",
+        "updatedAt": inq.updated_at.isoformat() if inq.updated_at else "",
+    }
+
+
+@router.get("/{inquiry_id}/internal-notes", response_model=Dict[str, Any])
+def get_internal_notes(
+    inquiry_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """UI-11: staff-only notes on a request (admins, or the vendor who owns it)."""
+    inq = db.query(BookingInquiry).filter(BookingInquiry.id == inquiry_id).first()
+    if not inq:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking inquiry not found")
+    ensure_can_manage_inquiry(db, inq, current_user)
+    return _notes_response(inq)
+
+
+@router.put("/{inquiry_id}/internal-notes", response_model=Dict[str, Any])
+def save_internal_notes(
+    inquiry_id: UUID,
+    body: InternalNotesBody,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    inq = db.query(BookingInquiry).filter(BookingInquiry.id == inquiry_id).first()
+    if not inq:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking inquiry not found")
+    ensure_can_manage_inquiry(db, inq, current_user)
+    if len(body.notes) > 5000:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Notes are limited to 5,000 characters")
+    inq.internal_notes = body.notes.strip() or None
+    db.commit()
+    db.refresh(inq)
+    return _notes_response(inq)

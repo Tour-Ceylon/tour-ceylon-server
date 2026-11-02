@@ -20,6 +20,7 @@ PROTECTED_PREFIXES = ("/api/v1/admin", "/api/v1/vendor/", "/api/v1/drivers/me")
 
 # (method, path) pairs under otherwise-public routers that must be authenticated.
 PROTECTED_ROUTES = {
+    ("POST", "/api/v1/users/"),
     ("GET", "/api/v1/booking-inquiries/me"),
     ("GET", "/api/v1/transport/bookings/me"),
     ("GET", "/api/v1/booking-inquiries/"),

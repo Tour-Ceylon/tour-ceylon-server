@@ -38,6 +38,9 @@ class BookingInquiry(Base, UUIDMixin, TimestampMixin):
     # Optional foreign key to confirmed booking
     booking_id = Column(UUID(as_uuid=True), ForeignKey("bookings.id"), nullable=True, index=True)
 
+    # Staff-only notes about this request (UI-11). Never part of any customer-facing response.
+    internal_notes = Column(Text, nullable=True)
+
     # JSON field for cart items
     cart_items = Column(JSON, nullable=False)
 

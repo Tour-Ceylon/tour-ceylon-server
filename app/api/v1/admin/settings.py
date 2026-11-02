@@ -12,6 +12,11 @@ router = APIRouter(
 )
 
 
+@router.get("/settings", response_model=AdminSettingsResponse)
+async def get_settings(service: AdminDashboardService = Depends(get_admin_service)):
+    return service.get_settings()
+
+
 @router.patch("/settings", response_model=AdminSettingsResponse)
 async def update_settings(
     payload: AdminSettingsUpdate,
