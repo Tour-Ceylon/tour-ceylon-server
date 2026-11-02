@@ -758,7 +758,8 @@ class BookingInquiryService:
                             user_id=target_user.id if target_user else None,
                             status=target_booking_status,
                             total_amount=Decimal(str(db_inquiry.total or 0)),
-                            currency=CurrencyCode.USD,
+                            # DATA-2: the booking carries the currency the guest was quoted in, not a fixed USD.
+                            currency=db_inquiry.currency or CurrencyCode.USD,
                             payment_status=PaymentTransactionStatus.PENDING,
                             booked_at=db_inquiry.created_at or datetime.utcnow(),
                         )
@@ -875,7 +876,8 @@ class BookingInquiryService:
                             user_id=system_user.id if system_user else None,
                             status=BookingStatus.CONFIRMED,
                             total_amount=Decimal(str(db_inquiry.total or 100)),
-                            currency=CurrencyCode.USD,
+                            # DATA-2: the booking carries the currency the guest was quoted in, not a fixed USD.
+                            currency=db_inquiry.currency or CurrencyCode.USD,
                             payment_status=PaymentTransactionStatus.PENDING,
                             booked_at=db_inquiry.created_at or datetime.utcnow(),
                         )

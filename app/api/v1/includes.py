@@ -1,58 +1,26 @@
 from typing import List
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status
+
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.config.database import get_db
-from app.repositories.include_repo import ListingIncludeRepository
-from app.schemas.include_schema import ListingIncludeCreate, ListingIncludeResponse
-from app.api.deps import require_role
-from app.models.enum import UserRole
+from app.models.listingAddOn import ListingAddOn
+from app.schemas.addon_schema import AddOnOut
 
 router = APIRouter()
 
 
-def get_include_repository(db: Session = Depends(get_db)) -> ListingIncludeRepository:
-    """Dependency to get listing include repository"""
-    return ListingIncludeRepository(db)
+@router.get("/listing/{listing_id}", response_model=List[AddOnOut])
+async def get_addons_by_listing(listing_id: UUID, db: Session = Depends(get_db)):
+    """Active add-ons for a listing (public: shown on the listing page).
 
-
-@router.post("/", dependencies=[Depends(require_role([UserRole.ADMIN]))], response_model=ListingIncludeResponse, status_code=status.HTTP_201_CREATED)
-async def create_listing_include(
-    include_data: ListingIncludeCreate,
-    include_repo: ListingIncludeRepository = Depends(get_include_repository)
-):
-    """Create a new listing include"""
-    try:
-        include = include_repo.create(include_data)
-        return include
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create listing include"
-        )
-
-
-@router.get("/listing/{listing_id}", response_model=List[ListingIncludeResponse])
-async def get_includes_by_listing(
-    listing_id: UUID,
-    include_repo: ListingIncludeRepository = Depends(get_include_repository)
-):
-    """Get all includes for a specific listing"""
-    includes = include_repo.get_by_listing(listing_id)
-    return includes
-
-
-@router.delete("/listing/{listing_id}", dependencies=[Depends(require_role([UserRole.ADMIN]))], status_code=status.HTTP_204_NO_CONTENT)
-async def delete_includes_by_listing(
-    listing_id: UUID,
-    include_repo: ListingIncludeRepository = Depends(get_include_repository)
-):
-    """Delete all includes for a specific listing"""
-    try:
-        include_repo.delete_by_listing(listing_id)
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete listing includes"
-        )
+    Admins create, edit and delete them under /admin/addons. The old POST and DELETE routes here
+    wrote to a repository that was only a stub, so they never stored anything and were removed.
+    """
+    return (
+        db.query(ListingAddOn)
+        .filter(ListingAddOn.listing_id == listing_id, ListingAddOn.is_active.is_(True))
+        .order_by(ListingAddOn.created_at)
+        .all()
+    )

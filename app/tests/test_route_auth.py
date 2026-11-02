@@ -38,8 +38,6 @@ PROTECTED_ROUTES = {
     ("POST", "/api/v1/rooms/"),
     ("PUT", "/api/v1/rooms/{room_id}"),
     ("DELETE", "/api/v1/rooms/{room_id}"),
-    ("POST", "/api/v1/listing-addons/"),
-    ("DELETE", "/api/v1/listing-addons/listing/{listing_id}"),
     ("POST", "/api/v1/transfers/"),
 }
 
