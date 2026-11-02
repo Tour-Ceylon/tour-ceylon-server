@@ -13,6 +13,7 @@ from app.models.enum import UserRole
 from app.models.listing import Listing
 from app.models.stay import StayProperty
 from app.models.bookingInquiry import BookingInquiry
+from app.models.enum import InquiryStatus
 from app.services.booking_inquiry_service import BookingInquiryService
 
 logger = logging.getLogger("app.vendor_booking_inquiries")
@@ -230,23 +231,26 @@ def update_vendor_inquiry_status(
         "rejected": "cancelled",
     }
     new_status = status_map.get(raw_status, raw_status)
-    inq.status = new_status
-    db.commit()
+    try:
+        target = InquiryStatus(new_status)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown status '{payload.status}'")
+
+    service = BookingInquiryService(db)
+    was_approved = inq.status in (InquiryStatus.QUOTED, InquiryStatus.CONVERTED_TO_BOOKING)
+    # One shared path: validates the move, provisions or releases bookings, notifies the guest in-app (FEAT-1, NOTIF-1).
+    service.transition_status(inq, target)
     db.refresh(inq)
 
     st_val = getattr(inq.status, "value", str(inq.status)).lower()
 
-    # Trigger room unit / capacity allocation and customer notification when vendor accepts/confirms booking
-    if new_status in ("quoted", "converted_to_booking") or raw_status in ("quoted", "converted_to_booking", "confirmed"):
+    # The first time a request is approved the guest is emailed (a stay gets a secure pay link).
+    if target in (InquiryStatus.QUOTED, InquiryStatus.CONVERTED_TO_BOOKING) and not was_approved:
         try:
-            service = BookingInquiryService(db)
-            service._auto_provision_stay_bookings(inq, confirm=True)
-            db.refresh(inq)
-            # A stay gets the confirmed price and a secure pay link; anything else the usual confirmation.
             notify_inquiry_approved(db, inq)
-            logger.info(f"Auto-provisioned room unit & dispatched confirmation email for inquiry {inq.reference}")
+            logger.info(f"Dispatched confirmation email for inquiry {inq.reference}")
         except Exception as ex:
-            logger.error(f"Error provisioning stay booking or sending email for inquiry {inq.reference}: {ex}")
+            logger.error(f"Error sending email for inquiry {inq.reference}: {ex}")
 
     return {
         "id": str(inq.id),

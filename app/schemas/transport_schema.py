@@ -187,3 +187,8 @@ class TransportBookingStatusUpdate(BaseModel):
 
 class TransportBookingNotesUpdate(BaseModel):
     internal_notes: str
+
+
+class TransportBookingCancelRequest(BaseModel):
+    """Guest cancellation: the reference plus the email used to book proves ownership."""
+    email: EmailStr

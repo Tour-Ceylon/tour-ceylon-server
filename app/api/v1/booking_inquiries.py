@@ -6,12 +6,15 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session, joinedload
 
-from app.api.deps import get_db, require_role
+from app.api.deps import get_current_user, get_db, require_role
 from app.core.logging import logger
 from app.models.bookingInquiry import BookingInquiry
 from app.models.enum import InquiryStatus, UserRole
 from app.models.transportBooking import TransportBooking
 from app.schemas.booking_inquiry_schema import (
+    BookingInquiryPublicView,
+    InquiryCancelRequest,
+    QuoteRequestCreate,
     BookingInquiryCreate,
     BookingInquiryResponse,
     BookingInquiryDetailed,
@@ -160,6 +163,32 @@ async def create_booking_inquiry(
         )
 
 
+@router.get("/me", response_model=List[BookingInquiryDetailed])
+def list_my_booking_inquiries(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """FLOW-2: the signed-in customer's own inquiries, matched on their account email (newest first)."""
+    service = get_booking_inquiry_service(db)
+    return service.list_inquiries_for_email(current_user.email)
+
+
+@router.post("/quote-request", response_model=BookingInquiryResponse, status_code=status.HTTP_201_CREATED)
+def create_quote_request(
+    data: QuoteRequestCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """FLOW-4: a custom-quote request (no cart, no payment). The team follows up by email or phone."""
+    service = get_booking_inquiry_service(db)
+    response = service.create_quote_request(data)
+    detailed = service.get_inquiry_by_id(response.id)
+    if detailed:
+        background_tasks.add_task(send_inquiry_notification_email, detailed)
+        background_tasks.add_task(send_customer_confirmation_email, detailed)
+    return response
+
+
 @router.get("/{inquiry_id}", dependencies=[Depends(require_role([UserRole.ADMIN]))], response_model=BookingInquiryDetailed)
 def get_booking_inquiry(
     inquiry_id: UUID,
@@ -191,35 +220,32 @@ def get_booking_inquiry(
         )
 
 
-@router.get("/reference/{reference}", response_model=BookingInquiryDetailed)
+@router.get("/reference/{reference}", response_model=BookingInquiryPublicView, response_model_by_alias=True)
 def get_booking_inquiry_by_reference(
     reference: str,
     db: Session = Depends(get_db)
 ):
-    """Get a booking inquiry by reference number"""
-    try:
-        service = get_booking_inquiry_service(db)
-        inquiry = service.get_inquiry_by_reference(reference)
-        
-        if not inquiry:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Booking inquiry not found"
-            )
-        
-        return inquiry
-        
-    except HTTPException:
-        raise
-    except HTTPException:
-        db.rollback()
-        raise
-    except Exception as e:
-        logger.error(f"Error retrieving booking inquiry by reference {reference}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve booking inquiry"
-        )
+    """FLOW-7: status and amounts for a reference (confirmation page, email links). No phone or email is returned."""
+    service = get_booking_inquiry_service(db)
+    view = service.get_public_view(reference.strip().upper())
+    if not view:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking inquiry not found")
+    return view
+
+
+@router.post("/reference/{reference}/cancel", response_model=BookingInquiryPublicView, response_model_by_alias=True)
+def cancel_booking_inquiry_by_reference(
+    reference: str,
+    body: InquiryCancelRequest,
+    db: Session = Depends(get_db)
+):
+    """FLOW-6: the guest cancels their own request. The email used to book must match."""
+    service = get_booking_inquiry_service(db)
+    view = service.cancel_for_customer(reference.strip().upper(), body.email)
+    if not view:
+        # Same answer for "no such reference" and "wrong email" so references cannot be probed.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No request found for that reference and email")
+    return view
 
 
 @router.get("/", dependencies=[Depends(require_role([UserRole.ADMIN]))], response_model=BookingInquiryListResponse)

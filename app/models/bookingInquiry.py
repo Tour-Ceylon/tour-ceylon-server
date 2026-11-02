@@ -29,6 +29,9 @@ class BookingInquiry(Base, UUIDMixin, TimestampMixin):
     total = Column(Numeric(10, 2), nullable=False)
     currency = Column(Enum(CurrencyCode, name="inquiry_currency_enum"), nullable=False)
     
+    # How the guest intends to pay: pay_at_property | bank_transfer | online (FLOW-1)
+    payment_method = Column(String(32), nullable=True)
+
     # Status tracking
     status = Column(Enum(InquiryStatus, name="inquiry_status_enum"), nullable=False, default=InquiryStatus.PENDING_CONTACT)
     

@@ -153,6 +153,10 @@ class BookingInquiryRepository:
         
         # Set default status
         inquiry_dict['status'] = InquiryStatus.PENDING_CONTACT
+
+        # payment_method is stored as its plain string value
+        pm = inquiry_dict.get('payment_method')
+        inquiry_dict['payment_method'] = getattr(pm, 'value', pm)
         
         db_inquiry = BookingInquiry(**inquiry_dict)
         self.db.add(db_inquiry)
@@ -169,8 +173,13 @@ class BookingInquiryRepository:
         return self._base_query().filter(BookingInquiry.reference == reference).first()
 
     def get_by_email(self, email: str) -> list[BookingInquiry]:
-        """Get all booking inquiries by email"""
-        return self._base_query().filter(BookingInquiry.email == email).order_by(BookingInquiry.created_at.desc()).all()
+        """Get all booking inquiries by email (case-insensitive)"""
+        return (
+            self._base_query()
+            .filter(func.lower(BookingInquiry.email) == (email or "").strip().lower())
+            .order_by(BookingInquiry.created_at.desc())
+            .all()
+        )
 
     def get_all(
         self,

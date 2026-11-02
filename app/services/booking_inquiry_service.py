@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import logger
 from app.models.bookingInquiry import BookingInquiry
-from app.models.enum import InquiryStatus
+from app.models.enum import InquiryStatus, PaymentMethod
 from app.repositories.booking_inquiry_repo import BookingInquiryRepository
 from app.schemas.booking_inquiry_schema import (
     BookingInquiryCreate,
@@ -17,8 +17,31 @@ from app.schemas.booking_inquiry_schema import (
     BookingInquiryListResponse,
     BookingInquirySearchParams,
     BookingInquiryUpdate,
-    CartItemSchema
+    BookingInquiryPublicView,
+    CartItemSchema,
+    PublicCartLine,
+    QuoteRequestCreate,
 )
+from app.services.inquiry_totals import compute_totals
+
+# FEAT-1: the inquiry lifecycle. `cancelled` is final; `converted_to_booking` can only be cancelled.
+#
+# What "converted_to_booking" creates: a parent Booking (reference = the inquiry
+# reference) with one BookingItem per cart line, capacity reserved in the
+# availability calendar, a StayBooking with allocated room units for stays, and
+# `inquiry.booking_id` pointing at that Booking. A transfer line already has its
+# TransportBooking from the moment the inquiry is created.
+ALLOWED_INQUIRY_TRANSITIONS: dict[InquiryStatus, set[InquiryStatus]] = {
+    InquiryStatus.PENDING_CONTACT: {
+        InquiryStatus.CONTACTED, InquiryStatus.QUOTED, InquiryStatus.CONVERTED_TO_BOOKING, InquiryStatus.CANCELLED,
+    },
+    InquiryStatus.CONTACTED: {InquiryStatus.QUOTED, InquiryStatus.CONVERTED_TO_BOOKING, InquiryStatus.CANCELLED},
+    InquiryStatus.QUOTED: {InquiryStatus.CONVERTED_TO_BOOKING, InquiryStatus.CANCELLED},
+    InquiryStatus.CONVERTED_TO_BOOKING: {InquiryStatus.CANCELLED},
+    InquiryStatus.CANCELLED: set(),
+}
+# A guest may cancel on their own only before it becomes a confirmed booking.
+CUSTOMER_CANCELLABLE = {InquiryStatus.PENDING_CONTACT, InquiryStatus.CONTACTED, InquiryStatus.QUOTED}
 
 
 class BookingInquiryService:
@@ -36,6 +59,12 @@ class BookingInquiryService:
         try:
             # Validate cart items pricing consistency
             self._validate_pricing(inquiry_data)
+
+            # FLOW-3: totals come from the cart, never from the browser.
+            totals = compute_totals(inquiry_data.cart_items, inquiry_data.currency.value)
+            inquiry_data.subtotal = totals.subtotal
+            inquiry_data.total = totals.total
+            inquiry_data.currency = totals.currency
             
             # Create the inquiry (Pending vendor review & confirmation)
             db_inquiry = self.repository.create(inquiry_data)
@@ -59,7 +88,12 @@ class BookingInquiryService:
                 id=db_inquiry.id,
                 reference=db_inquiry.reference,
                 status=db_inquiry.status,
-                created_at=db_inquiry.created_at
+                created_at=db_inquiry.created_at,
+                subtotal=totals.subtotal,
+                taxes=totals.taxes,
+                total=totals.total,
+                currency=totals.currency,
+                payment_method=db_inquiry.payment_method,
             )
             
         except Exception as e:
@@ -126,6 +160,15 @@ class BookingInquiryService:
     def update_inquiry(self, inquiry_id: UUID, inquiry_data: BookingInquiryUpdate) -> Optional[BookingInquiryDetailed]:
         """Update a booking inquiry"""
         try:
+            new_status = inquiry_data.status
+            if new_status is not None:
+                # Status changes must go through the lifecycle rules (and notify the guest).
+                existing = self.repository.get_by_id(inquiry_id)
+                if not existing:
+                    return None
+                self.transition_status(existing, new_status)
+                inquiry_data = inquiry_data.model_copy(update={"status": None})
+                inquiry_data.model_fields_set.discard("status")
             db_inquiry = self.repository.update(inquiry_id, inquiry_data)
             if not db_inquiry:
                 return None
@@ -137,32 +180,158 @@ class BookingInquiryService:
             logger.error(f"Error updating inquiry {inquiry_id}: {str(e)}")
             raise
 
+    def transition_status(self, db_inquiry: BookingInquiry, new_status: InquiryStatus) -> BookingInquiry:
+        """Move an inquiry to `new_status`: validate, provision/release, and create the in-app notification.
+
+        The only place an inquiry status changes (admin and vendor endpoints and the
+        customer cancel all come through here). Raises 409 for an invalid move.
+        """
+        current = db_inquiry.status
+        if new_status == current:
+            return db_inquiry
+        if new_status not in ALLOWED_INQUIRY_TRANSITIONS.get(current, set()):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Cannot change an inquiry from '{current.value}' to '{new_status.value}'.",
+            )
+
+        db_inquiry.status = new_status
+        self.db.commit()
+        self.db.refresh(db_inquiry)
+        logger.info(f"Inquiry {db_inquiry.reference}: {current.value} -> {new_status.value}")
+
+        if new_status in (InquiryStatus.QUOTED, InquiryStatus.CONVERTED_TO_BOOKING):
+            try:
+                self._auto_provision_stay_bookings(db_inquiry, confirm=True)
+                self.db.refresh(db_inquiry)
+            except Exception as auto_ex:
+                logger.error(f"Error provisioning booking for {db_inquiry.reference}: {auto_ex}")
+        elif new_status == InquiryStatus.CANCELLED:
+            try:
+                self._release_stay_bookings(db_inquiry)
+            except Exception as rel_ex:
+                logger.error(f"Error releasing bookings for {db_inquiry.reference}: {rel_ex}")
+
+        # NOTIF-1: the customer's in-app notification for this change.
+        self._notify_status(db_inquiry, new_status)
+        if db_inquiry.status != new_status:  # provisioning moved a quote straight to a booking
+            self._notify_status(db_inquiry, db_inquiry.status)
+        return db_inquiry
+
+    def _notify_status(self, db_inquiry: BookingInquiry, status_value: InquiryStatus) -> None:
+        try:
+            from app.services.notification_service import NotificationService
+
+            NotificationService(self.db).create_booking_status_notification(db_inquiry, status_value.value)
+        except Exception as notif_ex:  # never let a notification problem break a status change
+            logger.error(f"Could not create notification for {db_inquiry.reference}: {notif_ex}")
+
     def update_inquiry_status(self, inquiry_id: UUID, status: InquiryStatus) -> Optional[BookingInquiryDetailed]:
         """Update inquiry status"""
-        try:
-            db_inquiry = self.repository.update_status(inquiry_id, status)
-            if not db_inquiry:
-                return None
+        db_inquiry = self.repository.get_by_id(inquiry_id)
+        if not db_inquiry:
+            return None
+        self.transition_status(db_inquiry, status)
+        return self._convert_to_detailed_response(db_inquiry)
 
-            logger.info(f"Updated inquiry {db_inquiry.reference} status to {status}")
+    # ---- Customer-facing (FLOW-2, FLOW-6, FLOW-7) ----
 
-            raw_st = status.value if hasattr(status, "value") else str(status)
-            if raw_st in ("quoted", "converted_to_booking", "confirmed"):
-                try:
-                    self._auto_provision_stay_bookings(db_inquiry, confirm=True)
-                except Exception as auto_ex:
-                    logger.error(f"Error auto-provisioning stay booking on status update: {auto_ex}")
-            elif raw_st in ("cancelled", "rejected"):
-                try:
-                    self._release_stay_bookings(db_inquiry)
-                except Exception as rel_ex:
-                    logger.error(f"Error releasing stay bookings on status cancel: {rel_ex}")
+    def list_inquiries_for_email(self, email: str) -> list[BookingInquiryDetailed]:
+        return [self._convert_to_detailed_response(i) for i in self.repository.get_by_email(email)]
 
-            return self._convert_to_detailed_response(db_inquiry)
-            
-        except Exception as e:
-            logger.error(f"Error updating inquiry status {inquiry_id}: {str(e)}")
-            raise
+    def get_public_view(self, reference: str) -> Optional[BookingInquiryPublicView]:
+        db_inquiry = self.repository.get_by_reference(reference)
+        if not db_inquiry:
+            return None
+        lines = []
+        for raw in db_inquiry.cart_items or []:
+            item = dict(raw)
+            lines.append(PublicCartLine(
+                listingId=str(item.get("listing_id") or item.get("listingId") or ""),
+                title=str(item.get("title") or "Booking"),
+                travelDate=item.get("travel_date_raw") or item.get("travel_date") or item.get("travelDate"),
+                travelDateEnd=item.get("travel_date_end") or item.get("travelDateEnd"),
+                travelCount=int(item.get("travel_count") or item.get("travelCount") or 1),
+                price=Decimal(str(item.get("price") or 0)),
+                baseCurrency=str(item.get("base_currency") or item.get("baseCurrency") or "USD"),
+                selectedRooms=item.get("selected_rooms") or item.get("selectedRooms"),
+            ))
+        subtotal = Decimal(str(db_inquiry.subtotal))
+        total = Decimal(str(db_inquiry.total))
+        return BookingInquiryPublicView(
+            id=db_inquiry.id,
+            reference=db_inquiry.reference,
+            status=db_inquiry.status,
+            created_at=db_inquiry.created_at,
+            firstName=db_inquiry.first_name,
+            numberOfTravelers=db_inquiry.number_of_travelers,
+            cartItems=lines,
+            subtotal=subtotal,
+            taxes=total - subtotal,
+            total=total,
+            currency=db_inquiry.currency,
+            paymentMethod=db_inquiry.payment_method,
+            payment_status=self._latest_payment_status(db_inquiry.id),
+        )
+
+    def cancel_for_customer(self, reference: str, email: str) -> Optional[BookingInquiryPublicView]:
+        """Cancel on behalf of the guest who made it. Returns None when reference and email don't match."""
+        db_inquiry = self.repository.get_by_reference(reference)
+        if not db_inquiry or (db_inquiry.email or "").strip().lower() != (email or "").strip().lower():
+            return None
+        if db_inquiry.status not in CUSTOMER_CANCELLABLE and db_inquiry.status != InquiryStatus.CANCELLED:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This request is already confirmed. Please contact support to change or cancel it.",
+            )
+        self.transition_status(db_inquiry, InquiryStatus.CANCELLED)
+        return self.get_public_view(reference)
+
+    def create_quote_request(self, data: QuoteRequestCreate) -> BookingInquiryResponse:
+        """FLOW-4: a custom-quote request. Stored as an inquiry with an unpriced line; no cart, no payment."""
+        from app.models.enum import CurrencyCode
+
+        when = data.preferred_date or datetime.utcnow()
+        line = {
+            "listing_id": data.listing_id,
+            "title": data.listing_title,
+            "travel_date": when.isoformat(),
+            "travel_count": data.number_of_travelers,
+            "price": 0,
+            "base_currency": data.currency.value,
+            "kind": "quote_request",
+        }
+        note = "[Custom quote request]" + (f" {data.message.strip()}" if data.message and data.message.strip() else "")
+        db_inquiry = BookingInquiry(
+            reference=self.repository.generate_inquiry_reference(prefix="QUO"),
+            first_name=data.first_name,
+            last_name=data.last_name,
+            email=data.email,
+            phone=data.phone,
+            nationality=data.nationality or "",
+            number_of_travelers=data.number_of_travelers,
+            special_requests=note[:1000],
+            subtotal=Decimal("0"),
+            total=Decimal("0"),
+            currency=CurrencyCode(data.currency.value),
+            payment_method=None,
+            status=InquiryStatus.PENDING_CONTACT,
+            cart_items=[line],
+        )
+        self.db.add(db_inquiry)
+        self.db.commit()
+        self.db.refresh(db_inquiry)
+        logger.info(f"Created quote request {db_inquiry.reference}")
+        return BookingInquiryResponse(
+            id=db_inquiry.id,
+            reference=db_inquiry.reference,
+            status=db_inquiry.status,
+            created_at=db_inquiry.created_at,
+            subtotal=Decimal("0"),
+            taxes=Decimal("0"),
+            total=Decimal("0"),
+            currency=db_inquiry.currency,
+        )
 
     def delete_inquiry(self, inquiry_id: UUID) -> bool:
         """Delete a booking inquiry"""
@@ -208,25 +377,7 @@ class BookingInquiryService:
         from app.models.stay import StayProperty, StayRoomType
         from app.models.listingVariant import ListingVariant
 
-        calculated_subtotal = Decimal("0")
         for item in inquiry_data.cart_items:
-            # For stays with selected_rooms, item total is sum of room prices * room quantities
-            item_total = Decimal("0")
-            if getattr(item, "selected_rooms", None) and isinstance(item.selected_rooms, list):
-                rooms_sum = Decimal("0")
-                for sr in item.selected_rooms:
-                    if isinstance(sr, dict):
-                        r_price = Decimal(str(sr.get("price") or 0))
-                        r_qty = Decimal(str(sr.get("qty") or 1))
-                        rooms_sum += r_price * r_qty
-                if rooms_sum > Decimal("0"):
-                    item_total = rooms_sum
-
-            if item_total <= Decimal("0"):
-                item_total = item.price * Decimal(str(item.travel_count or 1))
-
-            calculated_subtotal += item_total
-
             # Verify against database listing
             listing = None
             try:
@@ -278,19 +429,6 @@ class BookingInquiryService:
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"Pricing mismatch for '{item.title}'. Database rate is higher than submitted price.",
                     )
-
-        # Enforce subtotal consistency
-        if abs(calculated_subtotal - inquiry_data.subtotal) > Decimal('1.00'):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cart subtotal mismatch (calculated {calculated_subtotal}, provided {inquiry_data.subtotal}). Please refresh your cart.",
-            )
-
-        if inquiry_data.total < inquiry_data.subtotal:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Total amount cannot be less than subtotal.",
-            )
 
 
     def latest_payment_statuses(self, inquiry_ids: list) -> dict:
@@ -432,6 +570,7 @@ class BookingInquiryService:
             subtotal=db_inquiry.subtotal,
             total=db_inquiry.total,
             currency=db_inquiry.currency,
+            payment_method=db_inquiry.payment_method,
             status=db_inquiry.status,
             created_at=db_inquiry.created_at,
             updated_at=db_inquiry.updated_at,

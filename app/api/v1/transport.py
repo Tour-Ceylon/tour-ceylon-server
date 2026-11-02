@@ -5,7 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List
 
+from app.api.deps import get_current_user
 from app.config.database import get_db
+from app.models.user import User
 from app.core.logging import logger
 from app.services.transport_service import TransportService
 from app.integrations.email_provider import email_provider
@@ -16,7 +18,8 @@ from app.schemas.transport_schema import (
     TransportBookingResponse,
     VehicleCategoryResponse,
     TransportLocationSuggestion,
-    TransportBookingDetailResponse
+    TransportBookingDetailResponse,
+    TransportBookingCancelRequest,
 )
 
 router = APIRouter()
@@ -169,7 +172,29 @@ async def create_transport_booking(
             detail="Failed to create transport booking"
         )
 
-@router.get("/bookings/{booking_reference}", response_model=TransportBookingDetailResponse)
+@router.get("/bookings/me", response_model=List[TransportBookingDetailResponse], response_model_exclude={"__all__": {"internal_notes"}})
+async def list_my_transport_bookings(
+    current_user: User = Depends(get_current_user),
+    service: TransportService = Depends(get_transport_service),
+):
+    """FLOW-6: the signed-in customer's own transfers (matched on account or booking email)."""
+    return service.list_bookings_for_customer(current_user.id, current_user.email)
+
+
+@router.post("/bookings/{booking_reference}/cancel", response_model=TransportBookingDetailResponse, response_model_exclude={"internal_notes"})
+async def cancel_my_transport_booking(
+    booking_reference: str,
+    body: TransportBookingCancelRequest,
+    service: TransportService = Depends(get_transport_service),
+):
+    """FLOW-6: the guest cancels their own transfer. The email used to book must match."""
+    booking = service.cancel_for_customer(booking_reference, body.email)
+    if not booking:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No transfer found for that reference and email")
+    return booking
+
+
+@router.get("/bookings/{booking_reference}", response_model=TransportBookingDetailResponse, response_model_exclude={"internal_notes"})
 async def get_booking_by_reference(
     booking_reference: str,
     service: TransportService = Depends(get_transport_service)
