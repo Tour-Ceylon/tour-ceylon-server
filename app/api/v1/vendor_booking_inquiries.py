@@ -13,6 +13,8 @@ from app.models.enum import UserRole
 from app.models.listing import Listing
 from app.models.stay import StayProperty
 from app.models.bookingInquiry import BookingInquiry
+from app.models.enum import InquiryStatus
+from app.services.booking_inquiry_service import BookingInquiryService
 
 logger = logging.getLogger("app.vendor_booking_inquiries")
 
@@ -83,6 +85,8 @@ def list_vendor_booking_inquiries(
         "converted_to_booking": 0,
         "cancelled": 0
     }
+
+    payment_status_by_inquiry = BookingInquiryService(db).latest_payment_statuses([inq.id for inq in all_inquiries])
 
     for inq in all_inquiries:
         cart_items = inq.cart_items or []
@@ -155,6 +159,7 @@ def list_vendor_booking_inquiries(
             "subtotal": float(inq.subtotal or 0.0),
             "total": float(inq.total or 0.0),
             "currency": str(inq.currency or "USD"),
+            "paymentStatus": payment_status_by_inquiry.get(inq.id),
             "createdAt": inq.created_at.isoformat() if inq.created_at else "",
             "updatedAt": inq.updated_at.isoformat() if inq.updated_at else ""
         })
@@ -175,6 +180,27 @@ def list_vendor_booking_inquiries(
     }
 
 
+def ensure_can_manage_inquiry(db: Session, inq: BookingInquiry, current_user: User) -> None:
+    """Admins can manage any inquiry; vendors only inquiries that contain their own listings."""
+    if is_admin_user(current_user):
+        return
+    v_listings = db.query(Listing).filter(Listing.vendor_id == current_user.id).all()
+    v_props = db.query(StayProperty).filter(StayProperty.vendor_id == current_user.id).all()
+    owned_ids = set(str(l.id) for l in v_listings)
+    owned_ids.update(str(p.id) for p in v_props)
+    owned_ids.update(str(p.listing_id) for p in v_props if p.listing_id)
+
+    owns_inquiry = any(
+        str(item.get("listing_id") or item.get("listingId") or "") in owned_ids
+        for item in (inq.cart_items or [])
+    )
+    if not owns_inquiry:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only update bookings for your own listings",
+        )
+
+
 @router.patch("/{inquiry_id}/status", response_model=Dict[str, Any])
 def update_vendor_inquiry_status(
     inquiry_id: UUID,
@@ -184,29 +210,13 @@ def update_vendor_inquiry_status(
 ):
     """Update a booking inquiry status as vendor, provision stay booking unit, and dispatch client confirmation email"""
     from app.services.booking_inquiry_service import BookingInquiryService
-    from app.integrations.email_provider import EmailProvider
+    from app.services.inquiry_approval import notify_inquiry_approved
 
     inq = db.query(BookingInquiry).filter(BookingInquiry.id == inquiry_id).first()
     if not inq:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking inquiry not found")
 
-    # Admins can update any inquiry; vendors only inquiries that contain their own listings
-    if not is_admin_user(current_user):
-        v_listings = db.query(Listing).filter(Listing.vendor_id == current_user.id).all()
-        v_props = db.query(StayProperty).filter(StayProperty.vendor_id == current_user.id).all()
-        owned_ids = set(str(l.id) for l in v_listings)
-        owned_ids.update(str(p.id) for p in v_props)
-        owned_ids.update(str(p.listing_id) for p in v_props if p.listing_id)
-
-        owns_inquiry = any(
-            str(item.get("listing_id") or item.get("listingId") or "") in owned_ids
-            for item in (inq.cart_items or [])
-        )
-        if not owns_inquiry:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You can only update bookings for your own listings",
-            )
+    ensure_can_manage_inquiry(db, inq, current_user)
 
     raw_status = payload.status.lower()
     status_map = {
@@ -221,24 +231,26 @@ def update_vendor_inquiry_status(
         "rejected": "cancelled",
     }
     new_status = status_map.get(raw_status, raw_status)
-    inq.status = new_status
-    db.commit()
+    try:
+        target = InquiryStatus(new_status)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown status '{payload.status}'")
+
+    service = BookingInquiryService(db)
+    was_approved = inq.status in (InquiryStatus.QUOTED, InquiryStatus.CONVERTED_TO_BOOKING)
+    # One shared path: validates the move, provisions or releases bookings, notifies the guest in-app (FEAT-1, NOTIF-1).
+    service.transition_status(inq, target)
     db.refresh(inq)
 
     st_val = getattr(inq.status, "value", str(inq.status)).lower()
 
-    # Trigger room unit / capacity allocation and customer notification when vendor accepts/confirms booking
-    if new_status in ("quoted", "converted_to_booking") or raw_status in ("quoted", "converted_to_booking", "confirmed"):
+    # The first time a request is approved the guest is emailed (a stay gets a secure pay link).
+    if target in (InquiryStatus.QUOTED, InquiryStatus.CONVERTED_TO_BOOKING) and not was_approved:
         try:
-            service = BookingInquiryService(db)
-            service._auto_provision_stay_bookings(inq, confirm=True)
-            detailed = service.get_inquiry_by_id(inq.id)
-            if detailed:
-                email_prov = EmailProvider()
-                email_prov.send_vendor_booking_accepted_email(detailed)
-                logger.info(f"Auto-provisioned room unit & dispatched confirmation email for inquiry {inq.reference}")
+            notify_inquiry_approved(db, inq)
+            logger.info(f"Dispatched confirmation email for inquiry {inq.reference}")
         except Exception as ex:
-            logger.error(f"Error provisioning stay booking or sending email for inquiry {inq.reference}: {ex}")
+            logger.error(f"Error sending email for inquiry {inq.reference}: {ex}")
 
     return {
         "id": str(inq.id),
@@ -250,3 +262,78 @@ def update_vendor_inquiry_status(
         "phone": inq.phone,
         "updatedAt": inq.updated_at.isoformat() if inq.updated_at else ""
     }
+
+
+@router.post("/{inquiry_id}/payment-link", response_model=Dict[str, Any])
+def send_inquiry_payment_link(
+    inquiry_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Email the guest a fresh pay link for an approved stay request (for example after the first one expired)."""
+    from app.payments.offers import build_inquiry_offer
+    from app.services.inquiry_approval import notify_inquiry_approved
+
+    inq = db.query(BookingInquiry).filter(BookingInquiry.id == inquiry_id).first()
+    if not inq:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking inquiry not found")
+    ensure_can_manage_inquiry(db, inq, current_user)
+
+    offer = build_inquiry_offer(db, inq)
+    if offer is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No payment link can be sent: the request must be an approved stay that is not yet paid, and online payments must be on.",
+        )
+    sent = notify_inquiry_approved(db, inq)
+    return {
+        "sent": bool(sent),
+        "paymentUrl": offer.url,
+        "expiresAt": offer.expires_at.isoformat(),
+        "message": "Payment link emailed to the guest." if sent else "The email could not be sent. Copy the link and send it to the guest yourself.",
+    }
+
+
+class InternalNotesBody(BaseModel):
+    notes: str = ""
+
+
+def _notes_response(inq: BookingInquiry) -> Dict[str, Any]:
+    return {
+        "id": str(inq.id),
+        "notes": inq.internal_notes or "",
+        "updatedAt": inq.updated_at.isoformat() if inq.updated_at else "",
+    }
+
+
+@router.get("/{inquiry_id}/internal-notes", response_model=Dict[str, Any])
+def get_internal_notes(
+    inquiry_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """UI-11: staff-only notes on a request (admins, or the vendor who owns it)."""
+    inq = db.query(BookingInquiry).filter(BookingInquiry.id == inquiry_id).first()
+    if not inq:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking inquiry not found")
+    ensure_can_manage_inquiry(db, inq, current_user)
+    return _notes_response(inq)
+
+
+@router.put("/{inquiry_id}/internal-notes", response_model=Dict[str, Any])
+def save_internal_notes(
+    inquiry_id: UUID,
+    body: InternalNotesBody,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    inq = db.query(BookingInquiry).filter(BookingInquiry.id == inquiry_id).first()
+    if not inq:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking inquiry not found")
+    ensure_can_manage_inquiry(db, inq, current_user)
+    if len(body.notes) > 5000:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Notes are limited to 5,000 characters")
+    inq.internal_notes = body.notes.strip() or None
+    db.commit()
+    db.refresh(inq)
+    return _notes_response(inq)

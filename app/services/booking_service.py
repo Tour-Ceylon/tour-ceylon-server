@@ -263,9 +263,16 @@ class BookingService:
             total_price = (unit_price * quantity).quantize(Decimal("0.01"))
             return unit_price, total_price
 
-    def create_booking(self, payload: BookingCreate, background_tasks: Optional[Any] = None) -> Booking:
+    def create_booking(
+        self,
+        payload: BookingCreate,
+        user_id: UUID,
+        background_tasks: Optional[Any] = None,
+    ) -> Booking:
         """
         Create a new booking with per-night availability locking and dual payment handling.
+
+        The owner (user_id) comes from the authenticated token, never from the payload.
         """
         # Reject ONLINE payment method (reserved for future gateway)
         if payload.payment_method == PaymentMethod.ONLINE:
@@ -318,7 +325,7 @@ class BookingService:
 
         booking = Booking(
             booking_reference=ref,
-            user_id=payload.user_id,
+            user_id=user_id,
             status=booking_status,
             total_amount=total_amount,
             currency=CurrencyCode.USD,
@@ -334,8 +341,8 @@ class BookingService:
             booking_id=booking.id,
             old_status=None,
             new_status=booking_status,
-            changed_by_type=ChangedByType.USER if payload.user_id else ChangedByType.SYSTEM,
-            changed_by_user_id=payload.user_id,
+            changed_by_type=ChangedByType.USER,
+            changed_by_user_id=user_id,
             changed_at=datetime.utcnow(),
         )
         self.db.add(status_hist)
@@ -808,4 +815,3 @@ class BookingService:
 
 def get_booking_service(db: Session) -> BookingService:
     return BookingService(db)
-

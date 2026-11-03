@@ -29,11 +29,17 @@ class BookingInquiry(Base, UUIDMixin, TimestampMixin):
     total = Column(Numeric(10, 2), nullable=False)
     currency = Column(Enum(CurrencyCode, name="inquiry_currency_enum"), nullable=False)
     
+    # How the guest intends to pay: pay_at_property | bank_transfer | online (FLOW-1)
+    payment_method = Column(String(32), nullable=True)
+
     # Status tracking
     status = Column(Enum(InquiryStatus, name="inquiry_status_enum"), nullable=False, default=InquiryStatus.PENDING_CONTACT)
     
     # Optional foreign key to confirmed booking
     booking_id = Column(UUID(as_uuid=True), ForeignKey("bookings.id"), nullable=True, index=True)
+
+    # Staff-only notes about this request (UI-11). Never part of any customer-facing response.
+    internal_notes = Column(Text, nullable=True)
 
     # JSON field for cart items
     cart_items = Column(JSON, nullable=False)

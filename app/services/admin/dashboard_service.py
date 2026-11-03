@@ -218,22 +218,24 @@ class AdminDashboardService:
             "siteName": settings.site_name,
             "contactEmail": settings.contact_email,
             "defaultCurrency": settings.default_currency,
+            "platformFeePercent": float(settings.platform_fee_percent if settings.platform_fee_percent is not None else 15),
         }
 
     def update_settings(self, payload: dict) -> dict:
         settings = self.settings.get_or_create()
-        updated = self.settings.update(
-            settings,
-            {
-                "site_name": payload["siteName"],
-                "contact_email": payload["contactEmail"],
-                "default_currency": payload["defaultCurrency"],
-            },
-        )
+        changes = {
+            "site_name": payload["siteName"],
+            "contact_email": payload["contactEmail"],
+            "default_currency": payload["defaultCurrency"],
+        }
+        if payload.get("platformFeePercent") is not None:
+            changes["platform_fee_percent"] = payload["platformFeePercent"]
+        updated = self.settings.update(settings, changes)
         return {
             "siteName": updated.site_name,
             "contactEmail": updated.contact_email,
             "defaultCurrency": updated.default_currency,
+            "platformFeePercent": float(updated.platform_fee_percent if updated.platform_fee_percent is not None else 15),
         }
 
     def reset(self) -> dict:

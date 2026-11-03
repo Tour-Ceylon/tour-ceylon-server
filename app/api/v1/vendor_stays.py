@@ -2,14 +2,15 @@ import logging
 from datetime import date
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.config.database import get_db
-from app.integrations.cloudinary import CloudinaryIntegrationError
+from app.integrations.cloudinary import CloudinaryIntegrationError, upload_image
 from app.models.enum import StayBookingStatus, UserRole
 from app.models.user import User
 from app.repositories.stay_repo import StayRepository
@@ -120,6 +121,53 @@ async def patch_stay_property(
     if property_record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stay property not found")
     return property_record
+
+
+MAX_UPLOAD_IMAGES = 10
+MAX_UPLOAD_IMAGE_BYTES = 10 * 1024 * 1024
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+
+
+@router.post("/images")
+async def upload_stay_images(
+    files: list[UploadFile] = File(...),
+    current_user: User = Depends(require_stay_vendor),
+):
+    """DATA-5: upload room / property photos to Cloudinary straight away and return their URLs.
+
+    The portal then saves the property with URLs only, instead of packing every photo into the
+    save request as a base64 data URL (up to 10 x ~1.5 MB per room).
+    """
+    if not files:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No images were sent")
+    if len(files) > MAX_UPLOAD_IMAGES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Send at most {MAX_UPLOAD_IMAGES} images at a time")
+
+    folder = f"tour-ceylon/vendor-stays/{current_user.id}"
+    uploaded: list[dict] = []
+    for upload in files:
+        if (upload.content_type or "").lower() not in ALLOWED_IMAGE_TYPES:
+            raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=f"{upload.filename or 'File'} is not a JPEG, PNG, WebP or GIF image")
+        data = await upload.read(MAX_UPLOAD_IMAGE_BYTES + 1)
+        if not data:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{upload.filename or 'File'} is empty")
+        if len(data) > MAX_UPLOAD_IMAGE_BYTES:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=f"{upload.filename or 'File'} is larger than 10 MB")
+        try:
+            result = await run_in_threadpool(upload_image, data, folder)
+        except CloudinaryIntegrationError as exc:
+            logger.error("Stay image upload failed for user %s: %s", current_user.id, exc)
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to upload stay images") from exc
+        uploaded.append(
+            {
+                "url": result["secure_url"],
+                "cloudinaryPublicId": result["public_id"],
+                "width": result.get("width"),
+                "height": result.get("height"),
+                "bytes": result.get("bytes", len(data)),
+            }
+        )
+    return {"images": uploaded}
 
 
 @router.post("/", response_model=StayPropertyResponse, response_model_by_alias=True, status_code=status.HTTP_201_CREATED)
@@ -432,10 +480,8 @@ async def update_property_booking_status(
 
         if new_status == StayBookingStatus.CONFIRMED and inquiry is not None:
             try:
-                from app.integrations.email_provider import EmailProvider
-                detailed = BookingInquiryService(db).get_inquiry_by_id(inquiry.id)
-                if detailed:
-                    EmailProvider().send_vendor_booking_accepted_email(detailed)
+                from app.services.inquiry_approval import notify_inquiry_approved
+                notify_inquiry_approved(db, inquiry)
             except Exception as exc:
                 logger.error(f"Failed to send confirmation email for {inquiry_ref}: {exc}")
 

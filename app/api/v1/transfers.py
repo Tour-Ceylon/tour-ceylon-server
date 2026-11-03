@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 from app.config.database import get_db
 from app.repositories.transfer_repo import TransferRepository
 from app.schemas.transfer_schema import TransferCreate, TransferResponse
+from app.api.deps import require_role
+from app.models.enum import UserRole
 
 router = APIRouter()
 
@@ -15,7 +17,7 @@ def get_transfer_repository(db: Session = Depends(get_db)) -> TransferRepository
     return TransferRepository(db)
 
 
-@router.post("/", response_model=TransferResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", dependencies=[Depends(require_role([UserRole.ADMIN]))], response_model=TransferResponse, status_code=status.HTTP_201_CREATED)
 async def create_transfer(
     transfer_data: TransferCreate,
     transfer_repo: TransferRepository = Depends(get_transfer_repository)

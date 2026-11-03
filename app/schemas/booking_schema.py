@@ -90,7 +90,9 @@ class BookingBase(BaseModel):
 
 
 class BookingCreate(BaseModel):
-    user_id: UUID
+    # NOTE: user_id is deliberately NOT accepted from the client. The booking owner
+    # is derived from the authenticated Clerk token in the route layer and passed
+    # explicitly to BookingService.create_booking().
     payment_method: PaymentMethod = PaymentMethod.PAY_AT_PROPERTY
     guest_name: str | None = None
     guest_email: str | None = None
@@ -102,8 +104,10 @@ class BookingCreate(BaseModel):
 
 
 class BookingUpdate(BaseModel):
+    # NOTE: user_id is intentionally omitted - BookingRepository.update() blindly
+    # setattr()s every provided field, so exposing it here would let any caller
+    # reassign a booking to a different user.
     booking_reference: str | None = None
-    user_id: UUID | None = None
     status: BookingStatus | None = None
     total_amount: Decimal | None = None
     currency: CurrencyCode | None = None

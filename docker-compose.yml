@@ -1,0 +1,38 @@
+# Tour Ceylon API only. The database (Supabase/Postgres) and the web apps are not part of this stack.
+#
+#   cp .env.example .env      # then fill it in
+#   docker compose up -d --build
+#
+# The port is bound to localhost: put a reverse proxy (Caddy or nginx) in front for HTTPS.
+name: tour-ceylon-server
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: tour-ceylon-server:latest
+    container_name: tour-ceylon-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ENV: production
+      DEBUG: "false"
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    volumes:
+      - api_logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  api_logs:

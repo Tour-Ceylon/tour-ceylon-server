@@ -2,9 +2,13 @@ from fastapi import APIRouter
 
 from app.api.v1.admin import (
     addons,
+    assignments,
+    notifications,
+    reviews,
     destinations,
     drivers,
     listings,
+    payments,
     reset,
     settings,
     snapshot,
@@ -16,6 +20,9 @@ from app.api.v1.admin import (
 router = APIRouter()
 router.include_router(snapshot.router)
 router.include_router(addons.router)
+router.include_router(assignments.router)
+router.include_router(notifications.router)
+router.include_router(reviews.router)
 router.include_router(destinations.router)
 router.include_router(listings.router)
 router.include_router(transport.router)
@@ -24,3 +31,5 @@ router.include_router(settings.router)
 router.include_router(reset.router)
 router.include_router(drivers.router)
 router.include_router(transport_bookings.router)
+
+router.include_router(payments.router)

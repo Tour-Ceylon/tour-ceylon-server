@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AdminSettingsBase(BaseModel):
@@ -8,9 +8,9 @@ class AdminSettingsBase(BaseModel):
 
 
 class AdminSettingsUpdate(AdminSettingsBase):
-    pass
+    platformFeePercent: float | None = Field(None, ge=0, le=100)
 
 
 class AdminSettingsResponse(AdminSettingsBase):
-    pass
+    platformFeePercent: float = 15
 

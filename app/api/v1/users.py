@@ -33,9 +33,14 @@ def get_user_repository(db: Session = Depends(get_db)) -> UserRepository:
 @router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def create_user(
     user_data: UserCreate,
-    user_repo: UserRepository = Depends(get_user_repository)
+    user_repo: UserRepository = Depends(get_user_repository),
+    _admin: User = Depends(require_role([UserRole.ADMIN])),
 ):
-    """Create a new user"""
+    """Create a user (admin only).
+
+    SEC-5: this used to be open to anyone and took a plaintext password. People now register through
+    Clerk's own sign-up and then call /users/apply-vendor (vendors) or /auth/driver/signup (drivers).
+    """
     
     # Check if user with email already exists
     if user_repo.exists_by_email(user_data.email):

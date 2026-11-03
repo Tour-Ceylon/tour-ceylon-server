@@ -362,6 +362,41 @@ class TransportService:
         self.db.refresh(db_booking)
         return db_booking
 
+    # --- Customer self-service (FLOW-6) ---
+
+    # A customer can cancel until the driver is on the way.
+    CUSTOMER_CANCEL_BLOCKED_ASSIGNMENT = {"en_route", "arrived", "in_progress", "completed"}
+
+    def list_bookings_for_customer(self, user_id: UUID, email: str) -> List[TransportBooking]:
+        from sqlalchemy import func, or_
+
+        return self.db.execute(
+            select(TransportBooking)
+            .filter(
+                or_(
+                    TransportBooking.user_id == user_id,
+                    func.lower(TransportBooking.customer_email) == (email or "").strip().lower(),
+                )
+            )
+            .order_by(TransportBooking.created_at.desc())
+        ).scalars().all()
+
+    def cancel_for_customer(self, reference: str, email: str) -> Optional[TransportBooking]:
+        """Cancel the guest's own transfer. None when reference and email don't match."""
+        booking = self.get_booking_by_reference(reference)
+        if not booking or (booking.customer_email or "").strip().lower() != (email or "").strip().lower():
+            return None
+        if (booking.booking_status or "").lower() == "cancelled":
+            return booking
+        if (booking.assignment_status or "").lower() in self.CUSTOMER_CANCEL_BLOCKED_ASSIGNMENT or (
+            (booking.booking_status or "").lower() in {"completed", "in_progress"}
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="This transfer is already under way. Please contact support to change or cancel it.",
+            )
+        return self.update_booking_status(booking.id, "cancelled")
+
     # --- Public API methods ---
 
     def list_active_categories(self) -> List[VehicleCategory]:

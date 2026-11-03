@@ -2,6 +2,9 @@ from enum import Enum
 
 
 class UserRole(str, Enum):
+    """The one source of truth for roles. The portal and the customer site map these to their own
+    UI names in `src/app/lib/roles.ts` / `src/lib/roles.ts` (ADMIN->admin, VENDOR->vendor,
+    DRIVER->driver, TOURIST->customer/tourist). Add a role here and both maps fail to compile."""
     VENDOR = "VENDOR"
     ADMIN = "ADMIN"
     DRIVER = "DRIVER"
