@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import List, Optional, Tuple
 from uuid import UUID
 
@@ -43,6 +44,16 @@ class PaymentRepository:
         self.db.add(event)
         self.db.flush()
         return event
+
+    def succeeded_totals(self) -> List[Tuple[str, Decimal, int]]:
+        """Money actually received, per currency (never added across currencies)."""
+        rows = self.db.execute(
+            select(Payment.currency, func.coalesce(func.sum(Payment.amount), 0), func.count())
+            .where(Payment.status == "succeeded")
+            .group_by(Payment.currency)
+            .order_by(Payment.currency)
+        ).all()
+        return [(currency, Decimal(str(total)), count) for currency, total, count in rows]
 
     def list_payments(
         self, status: Optional[str], page: int, page_size: int

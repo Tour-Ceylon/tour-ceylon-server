@@ -7,7 +7,7 @@ from app.api.deps import require_role
 from app.config.database import get_db
 from app.models.enum import UserRole
 from app.payments.repository import PaymentRepository
-from app.payments.schemas import AdminPaymentItem, AdminPaymentList
+from app.payments.schemas import AdminPaymentCurrencyTotal, AdminPaymentItem, AdminPaymentList, AdminPaymentSummary
 
 router = APIRouter(
     prefix="/payments",
@@ -29,4 +29,15 @@ def list_payments(
         total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+@router.get("/summary", response_model=AdminPaymentSummary)
+def payments_summary(db: Session = Depends(get_db)):
+    """FEAT-4: money received so far, per currency."""
+    return AdminPaymentSummary(
+        received=[
+            AdminPaymentCurrencyTotal(currency=currency, total=total, count=count)
+            for currency, total, count in PaymentRepository(db).succeeded_totals()
+        ]
     )

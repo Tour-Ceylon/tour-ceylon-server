@@ -85,3 +85,15 @@ class AdminPaymentList(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class AdminPaymentCurrencyTotal(BaseModel):
+    currency: str
+    total: Decimal
+    count: int
+
+
+class AdminPaymentSummary(BaseModel):
+    """Money received (status 'succeeded'), per currency."""
+
+    received: List[AdminPaymentCurrencyTotal]

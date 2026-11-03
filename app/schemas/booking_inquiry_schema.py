@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, EmailStr, field_validator, model_validator
 
-from app.models.enum import CurrencyCode, InquiryStatus
+from app.models.enum import CurrencyCode, InquiryStatus, PaymentMethod
 
 
 class CartItemSchema(BaseModel):
@@ -121,6 +121,7 @@ class BookingInquiryBase(BaseModel):
     emergency_contact: str | None = Field(None, max_length=200, alias="emergencyContact")
     number_of_travelers: int = Field(..., ge=1, le=50, alias="numberOfTravelers")
     special_requests: str | None = Field(None, max_length=1000, alias="specialRequests")
+    payment_method: PaymentMethod | None = Field(None, alias="paymentMethod")
     cart_items: list[CartItemSchema] = Field(..., min_length=1, alias="cartItems")
     subtotal: Decimal = Field(..., ge=0)
     total: Decimal = Field(..., ge=0)
@@ -128,8 +129,35 @@ class BookingInquiryBase(BaseModel):
 
 
 class BookingInquiryCreate(BookingInquiryBase):
-    """Schema for creating a booking inquiry"""
-    pass
+    """Schema for creating a booking inquiry.
+
+    `subtotal` and `total` are accepted for older clients but ignored: the
+    server computes them from the cart (FLOW-3).
+    """
+    subtotal: Decimal | None = Field(None, ge=0)
+    total: Decimal | None = Field(None, ge=0)
+
+
+class QuoteRequestCreate(BaseModel):
+    """A custom-quote request: no cart, no payment (FLOW-4)."""
+    model_config = ConfigDict(populate_by_name=True)
+
+    first_name: str = Field(..., min_length=1, max_length=100, alias="firstName")
+    last_name: str = Field(..., min_length=1, max_length=100, alias="lastName")
+    email: EmailStr
+    phone: str = Field(..., min_length=1, max_length=20)
+    nationality: str = Field("", max_length=100)
+    number_of_travelers: int = Field(..., ge=1, le=50, alias="numberOfTravelers")
+    listing_id: str = Field(..., min_length=1, max_length=100, alias="listingId")
+    listing_title: str = Field(..., min_length=1, max_length=200, alias="listingTitle")
+    preferred_date: datetime | None = Field(None, alias="preferredDate")
+    message: str | None = Field(None, max_length=1000)
+    currency: CurrencyCode = CurrencyCode.USD
+
+
+class InquiryCancelRequest(BaseModel):
+    """Guest cancellation: the reference plus the email used to book proves ownership."""
+    email: EmailStr
 
 
 class BookingInquiryResponse(BaseModel):
@@ -138,14 +166,57 @@ class BookingInquiryResponse(BaseModel):
     reference: str
     status: InquiryStatus
     created_at: datetime
+    # Server-computed amounts (FLOW-3), so the confirmation shows the real figure.
+    subtotal: Decimal | None = None
+    taxes: Decimal | None = None
+    total: Decimal | None = None
+    currency: CurrencyCode | None = None
+    payment_method: PaymentMethod | None = None
     
     model_config = ConfigDict(
         from_attributes=True,
+        populate_by_name=True,
         json_encoders={
             datetime: lambda v: v.isoformat(),
             Decimal: lambda v: float(v)
         }
     )
+
+
+class PublicCartLine(BaseModel):
+    """A cart line as shown to someone who only knows the reference (no vendor or contact data)."""
+    model_config = ConfigDict(populate_by_name=True)
+
+    listing_id: str = Field(..., alias="listingId")
+    title: str
+    travel_date: str | None = Field(None, alias="travelDate")
+    travel_date_end: str | None = Field(None, alias="travelDateEnd")
+    travel_count: int = Field(1, alias="travelCount")
+    price: Decimal
+    base_currency: str = Field("USD", alias="baseCurrency")
+    selected_rooms: list[Any] | None = Field(None, alias="selectedRooms")
+
+
+class BookingInquiryPublicView(BaseModel):
+    """What the confirmation / tracking page shows for a reference: status and amounts, no phone or email."""
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_encoders={datetime: lambda v: v.isoformat(), Decimal: lambda v: float(v)},
+    )
+
+    id: UUID
+    reference: str
+    status: InquiryStatus
+    created_at: datetime
+    first_name: str = Field(..., alias="firstName")
+    number_of_travelers: int = Field(..., alias="numberOfTravelers")
+    cart_items: list[PublicCartLine] = Field(..., alias="cartItems")
+    subtotal: Decimal
+    taxes: Decimal
+    total: Decimal
+    currency: CurrencyCode
+    payment_method: PaymentMethod | None = Field(None, alias="paymentMethod")
+    payment_status: str | None = None
 
 
 class BookingInquiryDetailed(BookingInquiryBase):

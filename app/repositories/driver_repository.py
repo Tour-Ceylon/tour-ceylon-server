@@ -109,6 +109,14 @@ class DriverRepository:
             return None
 
         driver.status = status
+
+        # The portal decides who sits on the "pending approval" screen from the USER's vendor_status,
+        # so a driver decision has to be mirrored there. Without this an approved driver stayed
+        # "pending" for good.
+        user_status = {"approved": "approved", "rejected": "rejected", "suspended": "suspended", "pending_review": "pending"}.get(status)
+        if user_status and driver.user is not None:
+            driver.user.vendor_status = user_status
+
         self.db.commit()
         self.db.refresh(driver)
         return driver

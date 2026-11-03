@@ -81,7 +81,7 @@ class NotificationService:
             payload=payload
         )
         
-        logger.info(f"Creating notification with recipient_email={inquiry.email}, type={notification_type}")
+        logger.info(f"Creating notification for inquiry {inquiry.reference}, type={notification_type}")
         
         try:
             notification = self.repository.create_notification(notification_request)

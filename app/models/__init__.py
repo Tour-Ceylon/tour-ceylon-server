@@ -3,6 +3,8 @@ from app.models.availabilityCalendar import AvailabilityCalendar
 from app.models.admin_dashboard import AdminSettings
 from app.models.booking import Booking, Bookings
 from app.models.bookingInquiry import BookingInquiry, BookingInquiries
+from app.models.inquiryAssignment import InquiryAssignment
+from app.models.listingAddOn import ListingAddOn
 from app.models.bookingItem import BookingItem
 from app.models.bookingStatusHistory import BookingStatusHistory
 from app.models.bookingTraveler import BookingTraveler
@@ -48,6 +50,8 @@ __all__ = [
     "Booking",
     "Bookings",
     "BookingInquiry",
+    "InquiryAssignment",
+    "ListingAddOn",
     "BookingInquiries",
     "BookingItem",
     "BookingStatusHistory",

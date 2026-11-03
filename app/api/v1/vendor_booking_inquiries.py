@@ -13,6 +13,7 @@ from app.models.enum import UserRole
 from app.models.listing import Listing
 from app.models.stay import StayProperty
 from app.models.bookingInquiry import BookingInquiry
+from app.models.enum import InquiryStatus
 from app.services.booking_inquiry_service import BookingInquiryService
 
 logger = logging.getLogger("app.vendor_booking_inquiries")
@@ -230,23 +231,26 @@ def update_vendor_inquiry_status(
         "rejected": "cancelled",
     }
     new_status = status_map.get(raw_status, raw_status)
-    inq.status = new_status
-    db.commit()
+    try:
+        target = InquiryStatus(new_status)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown status '{payload.status}'")
+
+    service = BookingInquiryService(db)
+    was_approved = inq.status in (InquiryStatus.QUOTED, InquiryStatus.CONVERTED_TO_BOOKING)
+    # One shared path: validates the move, provisions or releases bookings, notifies the guest in-app (FEAT-1, NOTIF-1).
+    service.transition_status(inq, target)
     db.refresh(inq)
 
     st_val = getattr(inq.status, "value", str(inq.status)).lower()
 
-    # Trigger room unit / capacity allocation and customer notification when vendor accepts/confirms booking
-    if new_status in ("quoted", "converted_to_booking") or raw_status in ("quoted", "converted_to_booking", "confirmed"):
+    # The first time a request is approved the guest is emailed (a stay gets a secure pay link).
+    if target in (InquiryStatus.QUOTED, InquiryStatus.CONVERTED_TO_BOOKING) and not was_approved:
         try:
-            service = BookingInquiryService(db)
-            service._auto_provision_stay_bookings(inq, confirm=True)
-            db.refresh(inq)
-            # A stay gets the confirmed price and a secure pay link; anything else the usual confirmation.
             notify_inquiry_approved(db, inq)
-            logger.info(f"Auto-provisioned room unit & dispatched confirmation email for inquiry {inq.reference}")
+            logger.info(f"Dispatched confirmation email for inquiry {inq.reference}")
         except Exception as ex:
-            logger.error(f"Error provisioning stay booking or sending email for inquiry {inq.reference}: {ex}")
+            logger.error(f"Error sending email for inquiry {inq.reference}: {ex}")
 
     return {
         "id": str(inq.id),
@@ -288,3 +292,48 @@ def send_inquiry_payment_link(
         "expiresAt": offer.expires_at.isoformat(),
         "message": "Payment link emailed to the guest." if sent else "The email could not be sent. Copy the link and send it to the guest yourself.",
     }
+
+
+class InternalNotesBody(BaseModel):
+    notes: str = ""
+
+
+def _notes_response(inq: BookingInquiry) -> Dict[str, Any]:
+    return {
+        "id": str(inq.id),
+        "notes": inq.internal_notes or "",
+        "updatedAt": inq.updated_at.isoformat() if inq.updated_at else "",
+    }
+
+
+@router.get("/{inquiry_id}/internal-notes", response_model=Dict[str, Any])
+def get_internal_notes(
+    inquiry_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """UI-11: staff-only notes on a request (admins, or the vendor who owns it)."""
+    inq = db.query(BookingInquiry).filter(BookingInquiry.id == inquiry_id).first()
+    if not inq:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking inquiry not found")
+    ensure_can_manage_inquiry(db, inq, current_user)
+    return _notes_response(inq)
+
+
+@router.put("/{inquiry_id}/internal-notes", response_model=Dict[str, Any])
+def save_internal_notes(
+    inquiry_id: UUID,
+    body: InternalNotesBody,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    inq = db.query(BookingInquiry).filter(BookingInquiry.id == inquiry_id).first()
+    if not inq:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking inquiry not found")
+    ensure_can_manage_inquiry(db, inq, current_user)
+    if len(body.notes) > 5000:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Notes are limited to 5,000 characters")
+    inq.internal_notes = body.notes.strip() or None
+    db.commit()
+    db.refresh(inq)
+    return _notes_response(inq)

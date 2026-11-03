@@ -15,6 +15,8 @@ from app.schemas.listing_schema import (
     ListingSearchParams,
 )
 from app.models.enum import CurrencyCode, ListingType, ListingStatus
+from app.api.deps import require_role
+from app.models.enum import UserRole
 
 router = APIRouter()
 
@@ -24,7 +26,7 @@ def get_listing_repository(db: Session = Depends(get_db)) -> ListingRepository:
     return ListingRepository(db)
 
 
-@router.post("/", response_model=ListingResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", dependencies=[Depends(require_role([UserRole.ADMIN]))], response_model=ListingResponse, status_code=status.HTTP_201_CREATED)
 async def create_listing(
     listing_data: ListingCreate,
     listing_repo: ListingRepository = Depends(get_listing_repository)
@@ -166,7 +168,7 @@ async def search_listings(
     )
 
 
-@router.put("/{listing_id}", response_model=ListingResponse)
+@router.put("/{listing_id}", dependencies=[Depends(require_role([UserRole.ADMIN]))], response_model=ListingResponse)
 async def update_listing(
     listing_id: UUID,
     listing_data: ListingUpdate,
@@ -205,7 +207,7 @@ async def update_listing(
         )
 
 
-@router.delete("/{listing_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{listing_id}", dependencies=[Depends(require_role([UserRole.ADMIN]))], status_code=status.HTTP_204_NO_CONTENT)
 async def delete_listing(
     listing_id: UUID,
     db: Session = Depends(get_db),
@@ -221,7 +223,7 @@ async def delete_listing(
         )
 
 
-@router.patch("/{listing_id}/archive", response_model=ListingResponse)
+@router.patch("/{listing_id}/archive", dependencies=[Depends(require_role([UserRole.ADMIN]))], response_model=ListingResponse)
 async def archive_listing(
     listing_id: UUID,
     db: Session = Depends(get_db),
@@ -239,7 +241,7 @@ async def archive_listing(
     return listing
 
 
-@router.patch("/{listing_id}/publish", response_model=ListingResponse)
+@router.patch("/{listing_id}/publish", dependencies=[Depends(require_role([UserRole.ADMIN]))], response_model=ListingResponse)
 async def publish_listing(
     listing_id: UUID,
     db: Session = Depends(get_db),
@@ -257,7 +259,7 @@ async def publish_listing(
     return listing
 
 
-@router.patch("/{listing_id}/draft", response_model=ListingResponse)
+@router.patch("/{listing_id}/draft", dependencies=[Depends(require_role([UserRole.ADMIN]))], response_model=ListingResponse)
 async def draft_listing(
     listing_id: UUID,
     db: Session = Depends(get_db),
